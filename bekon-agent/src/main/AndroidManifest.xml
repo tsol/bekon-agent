@@ -35,7 +35,7 @@
             android:foregroundServiceType="mediaProjection" />
 
         <service
-            android:name=".device.TouchService"
+            android:name=".device.touch.TouchService"
             android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
@@ -47,7 +47,7 @@
         </service>
 
         <service
-            android:name=".device.BekonImeService"
+            android:name=".device.ime.BekonImeService"
             android:exported="true"
             android:label="@string/ime_name"
             android:permission="android.permission.BIND_INPUT_METHOD">

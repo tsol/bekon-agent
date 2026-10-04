@@ -29,6 +29,7 @@ class LocalServer(
     private val port: Int,
     private val executor: ActionExecutor,
     private val mcp: McpHandler,
+    private val tunnelUp: () -> Boolean = { false },
 ) {
     private var engine: CIOApplicationEngine? = null
     val boundPort: Int get() = port
@@ -48,7 +49,7 @@ class LocalServer(
                             capture = h["capture"] ?: false,
                             touch = h["touch"] ?: false,
                             keyboard = h["keyboard"] ?: false,
-                            tunnel = h["tunnel"] ?: false,
+                            tunnel = tunnelUp() || (h["tunnel"] ?: false),
                         )
                     )
                 }
@@ -57,8 +58,8 @@ class LocalServer(
                     val s = executor.snapshot()
                     call.respond(
                         SnapshotResponse(
-                            captureW = s.captureW, captureH = s.captureH,
                             screenW = s.screenW, screenH = s.screenH,
+                            imageW = s.imageW, imageH = s.imageH,
                             items = s.items.map {
                                 SnapshotItem(
                                     ref = it.ref, name = it.label,

@@ -21,13 +21,13 @@ class BekonImeService : InputMethodService() {
         fun isEnabled(resolver: android.content.ContentResolver): Boolean {
             val enabled = Settings.Secure.getString(resolver, Settings.Secure.ENABLED_INPUT_METHODS)
                 ?: return false
-            return enabled.split(':').any { it.contains("pro.potoki.bekon") && it.contains("BekonImeService") }
+            return enabled.split(':').any { it.contains("pro.potoki.bekon.agent") && it.contains("BekonImeService") }
         }
 
         fun isSelected(resolver: android.content.ContentResolver): Boolean {
             val current = Settings.Secure.getString(resolver, Settings.Secure.DEFAULT_INPUT_METHOD)
                 ?: return false
-            return current.contains("BekonImeService")
+            return current.contains("pro.potoki.bekon.agent") && current.contains("BekonImeService")
         }
 
         fun statusDetail(resolver: android.content.ContentResolver): String = when {

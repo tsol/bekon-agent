@@ -1,14 +1,20 @@
 package pro.potoki.bekon.agent
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,10 +55,24 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import pro.potoki.bekon.agent.device.ime.BekonImeService
+import pro.potoki.bekon.agent.device.touch.TouchService
 import pro.potoki.bekon.agent.qr.qrBitmap
+import pro.potoki.bekon.agent.session.CapturePermissionActivity
 import pro.potoki.bekon.agent.session.SessionService
 
 class MainActivity : ComponentActivity() {
+    private val handler = Handler(Looper.getMainLooper())
+    private var bringUp = false
+    private var askedCapture = false
+    private var askedGestures = false
+    private var askedKeyboard = false
+    private var serviceWaits = 0
+
+    private val askNotifications = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { startAndBringUp() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -63,27 +83,82 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (bringUp) advanceBringUp()
+    }
+
     private fun dispatchIntent(i: HomeIntent) {
         when (i) {
-            HomeIntent.Start -> SessionService.start(this)
-            HomeIntent.Stop -> SessionService.stop(this)
+            HomeIntent.Start -> beginBringUp()
+            HomeIntent.Stop -> {
+                bringUp = false
+                handler.removeCallbacksAndMessages(null)
+                SessionService.stop(this)
+            }
             is HomeIntent.OpenSettingsScreen -> openSettings(i.row)
             HomeIntent.ShowQr -> { /* QR shown inline from state */ }
             is HomeIntent.SetTunnelKind -> { /* Cloudflare only in phase 1 */ }
         }
     }
 
+    /** Start the session, then ask for whatever is still off. Each step is asked once. */
+    private fun beginBringUp() {
+        bringUp = true
+        askedCapture = false
+        askedGestures = false
+        askedKeyboard = false
+        serviceWaits = 0
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        startAndBringUp()
+    }
+
+    private fun startAndBringUp() {
+        SessionService.start(this)
+        advanceBringUp()
+    }
+
+    private fun advanceBringUp() {
+        if (!bringUp || isFinishing) return
+        if (SessionService.instance == null) {
+            if (serviceWaits++ > 20) {
+                bringUp = false
+                return
+            }
+            handler.postDelayed({ advanceBringUp() }, 250)
+            return
+        }
+        val s = SessionService.state.value
+        if (!s.captureGranted && !askedCapture) {
+            askedCapture = true
+            startActivity(Intent(this, CapturePermissionActivity::class.java))
+            return
+        }
+        if (!TouchService.isBound() && !askedGestures) {
+            askedGestures = true
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            return
+        }
+        val keyboardReady = BekonImeService.isEnabled(contentResolver) &&
+            BekonImeService.isSelected(contentResolver)
+        if (!keyboardReady && !askedKeyboard) {
+            askedKeyboard = true
+            startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+            return
+        }
+        bringUp = false
+    }
+
     private fun openSettings(row: SettingsRow) {
         when (row) {
-            SettingsRow.SCREEN -> {
-                startActivity(Intent(this, pro.potoki.bekon.agent.session.CapturePermissionActivity::class.java))
-            }
-            SettingsRow.GESTURES -> {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-            SettingsRow.KEYBOARD -> {
-                startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-            }
+            SettingsRow.SCREEN -> startActivity(Intent(this, CapturePermissionActivity::class.java))
+            SettingsRow.GESTURES -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            SettingsRow.KEYBOARD -> startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
         }
     }
 }

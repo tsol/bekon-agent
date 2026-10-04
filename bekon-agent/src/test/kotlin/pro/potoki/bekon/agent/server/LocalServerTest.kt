@@ -25,13 +25,18 @@ class FakeExecutor : ActionExecutor {
         "capture" to true, "touch" to true, "keyboard" to true, "tunnel" to true,
     )
     override fun snapshot(): ScreenSnapshot = ScreenSnapshot(
-        captureW = 100, captureH = 200, screenW = 100, screenH = 200,
-        items = listOf(UiNode("e1", "Instagram", 50, 100, intArrayOf(0, 0, 100, 200), true)),
+        screenW = 1080, screenH = 2340, imageW = 540, imageH = 1170,
+        items = listOf(UiNode("e1", "YouTube", 540, 900, intArrayOf(390, 810, 690, 990), true)),
     )
     override fun screenshot(): JpegFrame = JpegFrame(byteArrayOf(1, 2, 3, 4), 10, 10)
     override fun tap(x: Int, y: Int): Boolean { tapCalls++; return true }
     override fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int): Boolean = true
+    override fun longPress(x: Int, y: Int): Boolean = true
+    override fun drag(x: Int, y: Int): Boolean = true
+    override fun release(): Boolean = true
     override fun type(text: String): Boolean = true
+    override fun key(name: String, n: Int): Boolean = true
+    override fun nav(action: String): Boolean = true
 }
 
 class LocalServerTest {
@@ -48,7 +53,9 @@ class LocalServerTest {
         assertTrue("health ok", health.contains("\"ok\":true"))
 
         val snap = client.get("http://127.0.0.1:$port/snapshot").bodyAsText()
-        assertTrue("snapshot has item", snap.contains("Instagram"))
+        assertTrue("snapshot has item", snap.contains("YouTube"))
+        assertTrue("snapshot carries real screen size", snap.contains("1080") && snap.contains("2340"))
+        assertTrue("snapshot carries image size", snap.contains("\"imageW\":540"))
 
         val tap = client.post("http://127.0.0.1:$port/tap") {
             contentType(ContentType.Application.Json)
@@ -67,7 +74,15 @@ class LocalServerTest {
             contentType(ContentType.Application.Json)
             setBody("""{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"snapshot","arguments":{}}}""")
         }.bodyAsText()
-        assertTrue("mcp call returns content", mcpCall.contains("Instagram"))
+        assertTrue("mcp call returns content", mcpCall.contains("YouTube"))
+        assertTrue("mcp call is envelope with content", mcpCall.contains("\"content\"") && mcpCall.contains("\"structuredContent\""))
+        // tools/list should carry a non-empty inputSchema for tap
+        val list = client.post("http://127.0.0.1:$port/mcp") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"jsonrpc":"2.0","id":3,"method":"tools/list"}""")
+        }.bodyAsText()
+        assertTrue("tap schema has x integer", list.contains("\"x\":{\"type\":\"integer\"}"))
+        assertTrue("swipe schema has ms optional", list.contains("\"ms\""))
 
         srv.stop()
         client.close()

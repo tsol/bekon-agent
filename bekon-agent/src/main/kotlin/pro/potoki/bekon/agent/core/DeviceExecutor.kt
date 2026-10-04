@@ -2,14 +2,14 @@ package pro.potoki.bekon.agent.core
 
 import android.content.Context
 import android.content.Intent
-import android.provider.Settings
-import pro.potoki.bekon.agent.device.capture.CaptureFrame
+import android.util.DisplayMetrics
+import android.view.WindowManager
 import pro.potoki.bekon.agent.device.capture.CaptureOpts
 import pro.potoki.bekon.agent.device.capture.ScreenCapture
+import pro.potoki.bekon.agent.device.ime.BekonImeService
 import pro.potoki.bekon.agent.device.touch.A11yDump
 import pro.potoki.bekon.agent.device.touch.TouchController
 import pro.potoki.bekon.agent.device.touch.TouchService
-import pro.potoki.bekon.agent.device.ime.BekonImeService
 import org.json.JSONArray
 
 /**
@@ -20,6 +20,8 @@ class DeviceExecutor(private val context: Context) : ActionExecutor {
 
     private var screenCapture: ScreenCapture? = null
     @Volatile private var captureStarted = false
+
+    private val screenSize: Pair<Int, Int> by lazy { realScreenSize() }
 
     /** Provide the MediaProjection permission result (called when user consents). */
     fun onCapturePermission(data: Intent, resultCode: Int) {
@@ -39,38 +41,42 @@ class DeviceExecutor(private val context: Context) : ActionExecutor {
 
     override fun snapshot(): ScreenSnapshot {
         val controller = controller()
-        val touch = controller != null
-        if (!touch) throw CapabilityException("touch: accessibility service not enabled")
+        if (controller == null) throw CapabilityException("touch: accessibility service not enabled")
         val raw = A11yDump.dumpJson() ?: throw CapabilityException("snapshot: no accessibility tree")
         val arr = JSONArray(raw)
-        val items = ArrayList<UiNode>()
+        val nodes = ArrayList<RawNode>()
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
             val b = o.optJSONArray("bounds")
-            val hasBounds = b != null && b.length() == 4
-            if (!hasBounds) continue
+            if (b == null || b.length() != 4) continue
             val l = b.getInt(0); val t = b.getInt(1); val r = b.getInt(2); val bot = b.getInt(3)
-            val w = r - l; val h = bot - t
-            if (w <= 0 || h <= 0) continue
-            val name = o.optString("text").ifBlank { o.optString("desc") }.ifBlank { "clickable" }
+            if (r - l <= 0 || bot - t <= 0) continue
+            val text = o.optString("text").trim().ifEmpty { null }
+            val desc = o.optString("desc").trim().ifEmpty { null }
             val clickable = o.optBoolean("clickable", false)
+            nodes.add(RawNode(intArrayOf(l, t, r, bot), text, desc, clickable))
+        }
+        val items = ArrayList<UiNode>()
+        for (i in nodes.indices) {
+            val rn = nodes[i]
             items.add(
                 UiNode(
-                    ref = "e${items.size + 1}",
-                    label = name,
-                    x = (l + r) / 2,
-                    y = (t + bot) / 2,
-                    bounds = intArrayOf(l, t, r, bot),
-                    clickable = clickable,
+                    ref = "e${i + 1}",
+                    label = resolveName(rn, nodes),
+                    x = (rn.bounds[0] + rn.bounds[2]) / 2,
+                    y = (rn.bounds[1] + rn.bounds[3]) / 2,
+                    bounds = rn.bounds,
+                    clickable = rn.clickable,
                 )
             )
         }
         val sc = screenCapture
+        val (sw, sh) = screenSize
         return ScreenSnapshot(
-            captureW = sc?.width ?: 0,
-            captureH = sc?.height ?: 0,
-            screenW = sc?.width ?: 0,
-            screenH = sc?.height ?: 0,
+            screenW = sw,
+            screenH = sh,
+            imageW = sc?.width ?: sw,
+            imageH = sc?.height ?: sh,
             items = items,
         )
     }
@@ -82,20 +88,62 @@ class DeviceExecutor(private val context: Context) : ActionExecutor {
         return JpegFrame(frame.bytes, frame.width, frame.height)
     }
 
-    override fun tap(x: Int, y: Int): Boolean {
+    override fun tap(x: Int, y: Int): Boolean =
+        controller()?.tap(x.toFloat(), y.toFloat())
+            ?: throw CapabilityException("touch: accessibility service not enabled")
+
+    override fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int): Boolean =
+        controller()?.swipe(x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat(), ms.toLong())
+            ?: throw CapabilityException("touch: accessibility service not enabled")
+
+    override fun longPress(x: Int, y: Int): Boolean =
+        controller()?.longPress(x.toFloat(), y.toFloat())
+            ?: throw CapabilityException("touch: accessibility service not enabled")
+
+    override fun drag(x: Int, y: Int): Boolean {
         val c = controller() ?: throw CapabilityException("touch: accessibility service not enabled")
-        return c.tap(x.toFloat(), y.toFloat())
+        return try {
+            c.drag(x.toFloat(), y.toFloat())
+        } catch (e: Exception) {
+            throw CapabilityException(e.message ?: "drag unsupported")
+        }
     }
 
-    override fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int): Boolean {
-        val c = controller() ?: throw CapabilityException("touch: accessibility service not enabled")
-        return c.swipe(x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat(), ms.toLong())
-    }
+    override fun release(): Boolean =
+        controller()?.release() ?: throw CapabilityException("touch: accessibility service not enabled")
 
-    override fun type(text: String): Boolean {
+    override fun type(text: String): Boolean =
+        controller()?.inputAsKeys(text)
+            ?: throw CapabilityException("touch: accessibility service not enabled")
+
+    override fun key(name: String, n: Int): Boolean =
+        controller()?.key(name, n) ?: throw CapabilityException("touch: accessibility service not enabled")
+
+    override fun nav(action: String): Boolean {
         val c = controller() ?: throw CapabilityException("touch: accessibility service not enabled")
-        return c.inputAsKeys(text)
+        return when (NavAction.fromWire(action)) {
+            NavAction.HOME -> c.home()
+            NavAction.BACK -> c.back()
+            NavAction.RECENTS -> c.recentApps()
+            null -> throw CapabilityException("unknown nav action")
+        }
     }
 
     private fun controller(): TouchController? = TouchService.instance?.controller
+
+    private fun resolveName(rn: RawNode, all: List<RawNode>): String =
+        NodeNameResolver.resolve(
+            rn.bounds, rn.text, rn.desc, rn.clickable,
+            all.map { it.bounds to (it.text ?: it.desc) },
+        )
+
+    private fun realScreenSize(): Pair<Int, Int> {
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val dm = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        wm.defaultDisplay.getRealMetrics(dm)
+        return dm.widthPixels to dm.heightPixels
+    }
+
+    private data class RawNode(val bounds: IntArray, val text: String?, val desc: String?, val clickable: Boolean)
 }

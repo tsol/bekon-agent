@@ -102,7 +102,7 @@ class SessionService : Service() {
         scope.launch {
             try {
                 val mcp = McpHandler(ex)
-                val srv = LocalServer(DEFAULT_PORT, ex, mcp)
+                val srv = LocalServer(DEFAULT_PORT, ex, mcp) { tunnel?.publicUrl != null }
                 srv.start()
                 server = srv
                 refreshState(ex)
@@ -133,6 +133,7 @@ class SessionService : Service() {
             captureGranted = ex.health()["capture"] ?: false,
             gesturesOn = TouchService.isBound(),
             keyboardOn = BekonImeService.isEnabled(contentResolver),
+            keyboardSelected = BekonImeService.isSelected(contentResolver),
         )
     }
 
