@@ -10,6 +10,7 @@ import io.ktor.server.cio.CIO
 import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
@@ -39,6 +40,18 @@ class LocalServer(
         engine = embeddedServer(CIO, port = port, host = "127.0.0.1", module = {
             install(ContentNegotiation) {
                 json(Json { ignoreUnknownKeys = true })
+            }
+            // CORS: the browser console calls /mcp cross-origin (Vite dev -> tunnel URL).
+            // Javalin-style before{} handler since enableCorsForAllOrigins() is not on Ktor.
+            intercept(io.ktor.server.application.ApplicationCallPipeline.Call) {
+                val resp = call.response
+                resp.headers.append("Access-Control-Allow-Origin", "*")
+                resp.headers.append("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                resp.headers.append("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization")
+                if (call.request.httpMethod == io.ktor.http.HttpMethod.Options) {
+                    call.respond(HttpStatusCode.OK)
+                    return@intercept
+                }
             }
             routing {
                 get("/health") {

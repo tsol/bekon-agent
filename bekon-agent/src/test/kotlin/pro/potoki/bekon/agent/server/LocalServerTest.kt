@@ -3,6 +3,7 @@ package pro.potoki.bekon.agent.server
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -83,6 +84,13 @@ class LocalServerTest {
         }.bodyAsText()
         assertTrue("tap schema has x integer", list.contains("\"x\":{\"type\":\"integer\"}"))
         assertTrue("swipe schema has ms optional", list.contains("\"ms\""))
+
+        // CORS: preflight OPTIONS must get allow-origin so the browser console works
+        val cors = client.get("http://127.0.0.1:$port/health") {
+            header("Origin", "http://localhost:5181")
+        }
+        val allowOrigin = cors.headers["Access-Control-Allow-Origin"]
+        assertTrue("CORS allow-origin present", allowOrigin == "*")
 
         srv.stop()
         client.close()
