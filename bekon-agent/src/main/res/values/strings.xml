@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Bekon Agent</string>
+    <string name="accessibility_service_description">Bekon Agent remote touch: injects taps and swipes from the control endpoint.</string>
+    <string name="ime_name">Bekon Keys</string>
+</resources>
