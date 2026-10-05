@@ -13,8 +13,9 @@ data class UiNode(
 /**
  * A snapshot of the screen: real screen size, the image size it was captured at, plus
  * ordered nodes. Coordinates of every node are in the *screen* space (screenW x screenH),
- * so a client that knows the screen size can tap precisely; if the screenshot is a
- * different size, `imageW`/`imageH` are provided so the client can scale.
+ * so a client that knows the screen size can tap precisely. `imageW`/`imageH` are the
+ * pixel size of a default screenshot (scale 0.25), not the preview buffer. A screenshot
+ * call can ask for another scale; its own width/height is the one to draw.
  */
 data class ScreenSnapshot(
     val screenW: Int,
@@ -24,8 +25,23 @@ data class ScreenSnapshot(
     val items: List<UiNode>,
 )
 
-/** Byte payload + size for a screenshot. */
-class JpegFrame(val bytes: ByteArray, val width: Int, val height: Int)
+/** Byte payload + size for a screenshot. Node taps stay in screen space, not these pixels. */
+class JpegFrame(
+    val bytes: ByteArray,
+    val width: Int,
+    val height: Int,
+    val mime: String = "image/jpeg",
+    val screenW: Int = 0,
+    val screenH: Int = 0,
+)
+
+/** What `screenshot` does when the caller omits scale, quality, or format. */
+object ScreenshotDefaults {
+    /** Four times smaller than the real screen on each side. */
+    const val SCALE = 0.25f
+    const val QUALITY = 70
+    const val FORMAT = "jpeg"
+}
 
 /** Thrown when a device capability is missing; maps to HTTP 409 / MCP isError. */
 class CapabilityException(message: String) : Exception(message)
@@ -40,7 +56,8 @@ enum class NavAction(val wire: String) {
 
 /** Key action exposed as a tool. */
 enum class KeyAction(val wire: String) {
-    BACKSPACE("backspace"), ENTER("enter"), CLEAR("clear"), SELECT_ALL("selectAll");
+    BACKSPACE("backspace"), ENTER("enter"), CLEAR("clear"), SELECT_ALL("selectAll"),
+    COPY("copy"), CUT("cut"), PASTE("paste");
     companion object {
         fun fromWire(s: String): KeyAction? = entries.firstOrNull { it.wire == s }
     }
@@ -54,7 +71,11 @@ enum class KeyAction(val wire: String) {
 interface ActionExecutor {
     fun health(): Map<String, Boolean>
     fun snapshot(): ScreenSnapshot
-    fun screenshot(): JpegFrame
+    fun screenshot(
+        scale: Float = ScreenshotDefaults.SCALE,
+        quality: Int = ScreenshotDefaults.QUALITY,
+        format: String = ScreenshotDefaults.FORMAT,
+    ): JpegFrame
     fun tap(x: Int, y: Int): Boolean
     fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int): Boolean
     fun longPress(x: Int, y: Int): Boolean
@@ -62,5 +83,7 @@ interface ActionExecutor {
     fun release(): Boolean
     fun type(text: String): Boolean   // keystrokes (inputAsKeys)
     fun key(name: String, n: Int): Boolean
+    /** Plain text on the system clipboard, or null when it is empty. */
+    fun clipboard(): String?
     fun nav(action: String): Boolean
 }

@@ -19,6 +19,8 @@ data class HomeState(
     val tunnelKind: TunnelKind = TunnelKind.CLOUDFLARE,
     val publicUrl: String? = null,
     val active: Boolean = false,
+    val paused: Boolean = false,
+    val readOnly: Boolean = false,
     val error: String? = null,
 ) {
     val canStart: Boolean get() = phase == SessionPhase.IDLE
@@ -30,6 +32,9 @@ data class HomeState(
 sealed interface HomeIntent {
     data object Start : HomeIntent
     data object Stop : HomeIntent
+    data object Pause : HomeIntent
+    data object Resume : HomeIntent
+    data class SetReadOnly(val on: Boolean) : HomeIntent
     data class OpenSettingsScreen(val row: SettingsRow) : HomeIntent
     data object ShowQr : HomeIntent
     data class SetTunnelKind(val kind: TunnelKind) : HomeIntent

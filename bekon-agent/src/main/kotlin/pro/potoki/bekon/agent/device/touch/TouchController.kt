@@ -121,18 +121,20 @@ class TouchController(private val svc: AccessibilityService) {
     }
 
     private fun typeViaInputConnection(ic: InputConnection, text: String): Boolean {
-        val kcm = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
         for (ch in text) {
             val ok = onMain {
                 when (ch) {
                     '\n', '\r' -> sendIcKey(ic, KeyEvent.KEYCODE_ENTER)
                     '\t' -> sendIcKey(ic, KeyEvent.KEYCODE_TAB)
+                    // Letters, spaces and punctuation go as committed text. A key event
+                    // for space or '.' is applied by the editor later than the next
+                    // letter, so the characters trade places.
                     else -> {
-                        val events = kcm.getEvents(charArrayOf(ch))
-                        if (events != null && events.isNotEmpty()) events.all { ic.sendKeyEvent(it) }
-                        else ic.commitText(ch.toString(), 1)
+                        val committed = ic.commitText(ch.toString(), 1)
+                        ic.finishComposingText()
+                        committed
                     }
-                } || ic.commitText(ch.toString(), 1)
+                }
             }
             if (!ok) {
                 Log.w(TAG, "IC failed at U+${ch.code.toString(16)}")
@@ -183,26 +185,10 @@ class TouchController(private val svc: AccessibilityService) {
                 val target = focusedEditable() ?: return false
                 setText(target, "")
             }
-            "selectAll" -> {
-                val target = focusedEditable() ?: return false
-                val len = target.text?.length ?: 0
-                val args = Bundle()
-                args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
-                args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, len)
-                target.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
-            }
-            "copy" -> {
-                val target = focusedEditable() ?: return false
-                target.performAction(AccessibilityNodeInfo.ACTION_COPY)
-            }
-            "cut" -> {
-                val target = focusedEditable() ?: return false
-                target.performAction(AccessibilityNodeInfo.ACTION_CUT)
-            }
-            "paste" -> {
-                val node = focusedEditable() ?: return false
-                node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-            }
+            "selectAll" -> imeContextAction(android.R.id.selectAll) || selectionOnFocused()
+            "copy" -> imeContextAction(android.R.id.copy) || actionOnFocused(AccessibilityNodeInfo.ACTION_COPY)
+            "cut" -> imeContextAction(android.R.id.cut) || actionOnFocused(AccessibilityNodeInfo.ACTION_CUT)
+            "paste" -> imeContextAction(android.R.id.paste) || actionOnFocused(AccessibilityNodeInfo.ACTION_PASTE)
             else -> {
                 Log.w(TAG, "unknown key $name")
                 false
@@ -210,6 +196,40 @@ class TouchController(private val svc: AccessibilityService) {
         }
         Log.i(TAG, "key $name -> $ok")
         return ok
+    }
+
+    /** Keyboard action on the focused field. Docs ignores accessibility selection. */
+    private fun imeContextAction(id: Int): Boolean {
+        val ic = currentInputConnection() ?: return false
+        return try {
+            val ok = onMain { ic.performContextMenuAction(id) }
+            Log.i(TAG, "ime context $id -> $ok")
+            ok
+        } catch (e: Exception) {
+            Log.w(TAG, "ime context $id: ${e.message}")
+            false
+        }
+    }
+
+    /** The focused editor only. Do not grab the first editable in the window. */
+    private fun focusedInputOnly(): AccessibilityNodeInfo? {
+        val root = svc.rootInActiveWindow ?: return null
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
+        return if (canSetText(focused)) focused else null
+    }
+
+    private fun actionOnFocused(action: Int): Boolean {
+        val target = focusedInputOnly() ?: return false
+        return target.performAction(action)
+    }
+
+    private fun selectionOnFocused(): Boolean {
+        val target = focusedInputOnly() ?: return false
+        val len = target.text?.length ?: 0
+        val args = Bundle()
+        args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+        args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, len)
+        return target.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
     }
 
     private fun focusedEditable(): AccessibilityNodeInfo? {

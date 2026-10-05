@@ -14,8 +14,11 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonObject
+import pro.potoki.bekon.agent.access.ClientGate
 import pro.potoki.bekon.agent.core.ActionExecutor
+import pro.potoki.bekon.agent.shortcuts.ShortcutStore
 import pro.potoki.bekon.agent.core.CapabilityException
+import pro.potoki.bekon.agent.core.ScreenshotDefaults
 import java.util.Base64
 
 /**
@@ -27,7 +30,19 @@ import java.util.Base64
  * (content + structuredContent + isError), and the exposed tools are exactly what the
  * touch controller already does (no new phone "intelligence").
  */
-class McpHandler(private val executor: ActionExecutor) {
+class McpHandler(
+    private val executor: ActionExecutor,
+    private val gate: ClientGate? = null,
+    private val readOnly: () -> Boolean = { false },
+    private val shortcuts: ShortcutStore? = null,
+) {
+    companion object {
+        const val READ_ONLY = "device is in read-only mode so this action was declined."
+        val WRITE_TOOLS = setOf(
+            "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
+        )
+    }
+
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -46,11 +61,17 @@ class McpHandler(private val executor: ActionExecutor) {
             respondJson(call, JsonRpcResponse(id = 0, error = errElement("invalid json"))); return
         }
         val id = req.id
+        val blocked = gate?.rejection(clientIdOf(call, req), clientIp(call))
+        if (blocked != null) {
+            respondJson(call, JsonRpcResponse(id = id, error = errElement(blocked)))
+            return
+        }
         when (req.method) {
             "initialize" -> respondJson(call, JsonRpcResponse(id = id, result = buildJsonObject {
                 put("protocolVersion", "2025-03-26")
                 put("capabilities", buildJsonObject { put("tools", JsonObject(emptyMap())) })
                 put("serverInfo", buildJsonObject { put("name", "bekon-agent"); put("version", "0.1") })
+                put("instructions", ClientGate.INSTRUCTIONS)
             }))
             "notifications/initialized" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
             "ping" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
@@ -59,17 +80,31 @@ class McpHandler(private val executor: ActionExecutor) {
                 val params = req.params?.jsonObject ?: JsonObject(emptyMap())
                 val name = (params["name"] as? JsonPrimitive)?.content ?: ""
                 val args = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
+                if (readOnly() && name in WRITE_TOOLS) {
+                    respondJson(call, JsonRpcResponse(id = id, error = errElement(READ_ONLY)))
+                    return
+                }
                 try {
                     val data = callTool(name, args)
                     val content: JsonObject = when {
                         name == "screenshot" -> data
                         name == "snapshot" -> data
-                        else -> buildJsonObject { put("type", "text"); put("text", "ok") }
+                        else -> {
+                            val clip = (data["text"] as? JsonPrimitive)?.content
+                            buildJsonObject { put("type", "text"); put("text", clip ?: "ok") }
+                        }
                     }
                     val toolResult = buildJsonObject {
                         put("content", buildJsonArray {
                             if (name == "screenshot") {
-                                add(buildJsonObject { put("type", "image"); put("data", (data as JsonObject)["data"]?.toString() ?: "") })
+                                val obj = data as JsonObject
+                                val b64 = (obj["data"] as? JsonPrimitive)?.content ?: ""
+                                val mime = (obj["mime"] as? JsonPrimitive)?.content ?: "image/jpeg"
+                                add(buildJsonObject {
+                                    put("type", "image")
+                                    put("mimeType", mime)
+                                    put("data", b64)
+                                })
                             } else {
                                 add(content)
                             }
@@ -118,10 +153,14 @@ class McpHandler(private val executor: ActionExecutor) {
             }
         }
         "screenshot" -> {
-            val f = executor.screenshot()
+            val scale = args.floatOr("scale") ?: ScreenshotDefaults.SCALE
+            val quality = args.intOr("quality") ?: ScreenshotDefaults.QUALITY
+            val format = args.strOr("format") ?: ScreenshotDefaults.FORMAT
+            val f = executor.screenshot(scale, quality, format)
             buildJsonObject {
-                put("mime", "image/jpeg")
+                put("mime", f.mime)
                 put("width", f.width); put("height", f.height)
+                put("screenW", f.screenW); put("screenH", f.screenH)
                 put("data", Base64.getEncoder().encodeToString(f.bytes))
             }
         }
@@ -135,30 +174,116 @@ class McpHandler(private val executor: ActionExecutor) {
         "release" -> buildJsonObject { put("ok", executor.release()) }
         "type" -> buildJsonObject { put("ok", executor.type(args.str("text"))) }
         "key" -> {
+            val keyName = args.str("name")
             val n = args.intOr("n") ?: 1
-            buildJsonObject { put("ok", executor.key(args.str("name"), n)) }
+            val before = if (keyName == "copy" || keyName == "cut") executor.clipboard() else null
+            val ok = executor.key(keyName, n)
+            buildJsonObject {
+                put("ok", ok)
+                if (ok && (keyName == "copy" || keyName == "cut")) {
+                    var text = executor.clipboard()
+                    val deadline = System.currentTimeMillis() + 500
+                    while (text == before && System.currentTimeMillis() < deadline) {
+                        Thread.sleep(40)
+                        text = executor.clipboard()
+                    }
+                    text?.let { put("text", it) }
+                }
+            }
+        }
+        "clipboard" -> {
+            val text = executor.clipboard()
+                ?: throw IllegalArgumentException("clipboard empty or unavailable")
+            buildJsonObject { put("text", text) }
         }
         "nav" -> {
             val action = args.str("action")
             buildJsonObject { put("ok", executor.nav(action)) }
+        }
+        "shortcuts" -> shortcutStore().listPayload()
+        "shortcut_add" -> {
+            val saved = shortcutStore().add(args.str("title"), args.str("kind"), args.str("target"))
+            buildJsonObject {
+                put("id", saved.id)
+                put("title", saved.title)
+                put("kind", saved.kind)
+                put("target", saved.target)
+                put("text", "saved ${saved.id}")
+            }
+        }
+        "shortcut_open" -> {
+            val id = args.str("id")
+            shortcutStore().open(id)
+            buildJsonObject { put("ok", true); put("text", "opened $id") }
+        }
+        "shortcut_remove" -> {
+            val id = args.str("id")
+            val removed = shortcutStore().remove(id)
+            if (!removed) throw IllegalArgumentException("no shortcut $id")
+            buildJsonObject { put("ok", true); put("text", "removed $id") }
         }
         else -> throw IllegalArgumentException("unknown tool $name")
     }
 
     private val toolsList: JsonElement = buildJsonArray {
         tool("snapshot", "Accessibility-tree snapshot of the screen (nodes in screen space)", schema())
-        tool("screenshot", "Capture a JPEG screenshot of the screen (base64)", schema())
+        tool(
+            "screenshot",
+            "Capture the screen. scale is a fraction of the real screen (default 0.25, four times smaller). format is jpeg or png. quality is 1-100 and applies to jpeg only. Node coordinates stay in screen space; use width/height to place this image.",
+            schema {
+                num("scale", required = false)
+                int("quality", required = false)
+                str("format", enum = listOf("jpeg", "png"), required = false)
+            },
+        )
         tool("tap", "Tap at screen coordinates", schema { int("x"); int("y") })
         tool("swipe", "Swipe between two points", schema { int("x1"); int("y1"); int("x2"); int("y2"); int("ms", required = false) })
         tool("longPress", "Long-press at a screen coordinate", schema { int("x"); int("y") })
         tool("drag", "Press and hold a finger down (release to let go)", schema { int("x"); int("y") })
         tool("release", "Lift a held finger", schema())
         tool("type", "Type text as key presses into the focused field", schema { str("text") })
-        tool("key", "Send an editing key: backspace/enter/clear/selectAll", schema {
-            str("name", enum = listOf("backspace", "enter", "clear", "selectAll"))
+        tool("key", "Editing key. copy and cut also return the clipboard text.", schema {
+            str("name", enum = listOf("backspace", "enter", "clear", "selectAll", "copy", "cut", "paste"))
             int("n", required = false)
         })
+        tool("clipboard", "Read plain text from the system clipboard", schema())
         tool("nav", "Global navigation: home/back/recents", schema { str("action", enum = listOf("home", "back", "recents")) })
+        tool(
+            "shortcuts",
+            "List saved shortcuts. Call this after connecting, before hunting through the home screen. A row may already open the app or page the task needs.",
+            schema(),
+        )
+        tool(
+            "shortcut_add",
+            "Save a shortcut. kind is app (target is the Android package name) or url (target is an http or https link). The same target is not saved twice.",
+            schema {
+                str("title")
+                str("kind", enum = listOf("app", "url"))
+                str("target")
+            },
+        )
+        tool("shortcut_open", "Open a saved shortcut by id. An app launches on the phone. A url opens in the browser.", schema { str("id") })
+        tool("shortcut_remove", "Delete a saved shortcut by id.", schema { str("id") })
+    }
+
+    private fun shortcutStore(): ShortcutStore =
+        shortcuts ?: throw IllegalArgumentException("shortcuts are not available")
+
+    private fun ShortcutStore.listPayload() = buildJsonObject {
+        val rows = list()
+        put("items", buildJsonArray {
+            for (row in rows) {
+                add(buildJsonObject {
+                    put("id", row.id)
+                    put("title", row.title)
+                    put("kind", row.kind)
+                    put("target", row.target)
+                })
+            }
+        })
+        put("text", if (rows.isEmpty()) "no shortcuts" else rows.joinToString("\n") {
+            "${it.id} ${it.kind} ${it.title} ${it.target}"
+        })
     }
 
     private fun JsonArrayBuilder.tool(name: String, desc: String, schema: JsonObject) {
@@ -188,6 +313,7 @@ class McpHandler(private val executor: ActionExecutor) {
     private class PropBuilder {
         val props = LinkedHashMap<String, Prop>()
         fun int(k: String, required: Boolean = true) = add(k, buildJsonObject { put("type", "integer") }, required)
+        fun num(k: String, required: Boolean = true) = add(k, buildJsonObject { put("type", "number") }, required)
         fun str(k: String, enum: List<String>? = null, required: Boolean = true) =
             add(k, buildJsonObject {
                 put("type", "string")
@@ -204,7 +330,34 @@ class McpHandler(private val executor: ActionExecutor) {
         else -> throw IllegalArgumentException("$key is not an integer")
     }
     private fun JsonObject.intOr(key: String): Int? = try { int(key) } catch (e: Exception) { null }
+    private fun JsonObject.floatOr(key: String): Float? {
+        val v = this[key] as? JsonPrimitive ?: return null
+        return try { v.content.toFloat() } catch (e: Exception) { null }
+    }
     private fun JsonObject.str(key: String): String = (this[key] as? JsonPrimitive)?.content ?: ""
+    private fun JsonObject.strOr(key: String): String? {
+        val s = (this[key] as? JsonPrimitive)?.content ?: return null
+        return s.ifBlank { null }
+    }
+
+    private fun clientIdOf(call: ApplicationCall, req: JsonRpcRequest): String? {
+        val header = call.request.headers[ClientGate.HEADER]?.trim()?.takeIf { it.isNotEmpty() }
+        if (header != null) return header
+        val params = req.params as? JsonObject ?: return null
+        val info = params["clientInfo"] as? JsonObject
+        val fromInfo = (info?.get("uniqueId") as? JsonPrimitive)?.content?.trim()
+        if (!fromInfo.isNullOrEmpty()) return fromInfo
+        return (params["uniqueId"] as? JsonPrimitive)?.content?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun clientIp(call: ApplicationCall): String {
+        val headers = call.request.headers
+        val cf = headers["CF-Connecting-IP"]?.trim()?.takeIf { it.isNotEmpty() }
+        if (cf != null) return cf
+        val forwarded = headers["X-Forwarded-For"]?.split(",")?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+        if (forwarded != null) return forwarded
+        return call.request.local.remoteHost
+    }
 
     private fun errElement(msg: String): JsonElement = buildJsonObject {
         put("code", -32000); put("message", msg)

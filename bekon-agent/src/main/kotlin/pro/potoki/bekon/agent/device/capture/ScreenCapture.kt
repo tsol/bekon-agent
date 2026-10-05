@@ -90,10 +90,10 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
             syncPreviewFromPrefs()
             val reader = imageReader
             if (reader != null && tw == width && th == height) {
-                return waitEncoded(reader, opts.quality, tw, th)
+                return waitEncoded(reader, opts.quality, tw, th, opts.mime)
             }
         }
-        return captureBySwap(tw, th, opts.quality)
+        return captureBySwap(tw, th, opts.quality, opts.mime)
     }
 
     override fun onDisplayWoke() {
@@ -114,7 +114,7 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
      * MediaProjection typically allows one virtual display. Tear down the preview,
      * capture at [w]×[h] JPEG, then restore preview.
      */
-    private fun captureBySwap(w: Int, h: Int, quality: Int): CaptureFrame? {
+    private fun captureBySwap(w: Int, h: Int, quality: Int, mime: String): CaptureFrame? {
         val mp = mediaProjection ?: return null
         val dpi = context.resources.displayMetrics.densityDpi
         releasePreviewDisplay()
@@ -132,7 +132,7 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
             return null
         }
         try {
-            return waitEncoded(reader, quality, w, h)
+            return waitEncoded(reader, quality, w, h, mime)
         } finally {
             vd.release()
             reader.close()
@@ -170,6 +170,7 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
         quality: Int,
         expectW: Int,
         expectH: Int,
+        mime: String,
     ): CaptureFrame? {
         val deadline = System.currentTimeMillis() + TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
@@ -189,10 +190,10 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
                     bmp.recycle()
                     s
                 }
-                val bytes = bitmapToJpeg(sized, quality)
+                val bytes = encode(sized, quality, mime)
                 sized.recycle()
                 skipBlackUntil = 0L
-                return CaptureFrame(bytes, expectW, expectH, CaptureFrame.JPEG)
+                return CaptureFrame(bytes, expectW, expectH, mime)
             }
             Thread.sleep(50)
         }
@@ -226,9 +227,13 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
         }
     }
 
-    private fun bitmapToJpeg(bitmap: Bitmap, quality: Int): ByteArray {
+    private fun encode(bitmap: Bitmap, quality: Int, mime: String): ByteArray {
         val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        if (mime == CaptureFrame.PNG) {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        } else {
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        }
         return out.toByteArray()
     }
 

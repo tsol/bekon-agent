@@ -7,6 +7,8 @@ data class CaptureOpts(
     val hiRes: Boolean,
     val scale: Float,
     val quality: Int,
+    /** image/jpeg or image/png. PNG ignores quality. */
+    val mime: String = CaptureFrame.JPEG,
 )
 
 /** Phone defaults for JPEG capture. Command `scale` / `quality` override these. */
@@ -56,13 +58,21 @@ object CapturePrefs {
         hiRes: Boolean,
         scale: Float? = null,
         quality: Int? = null,
+        format: String? = null,
     ): CaptureOpts {
         val defScale = if (hiRes) hiresScale(ctx) else previewScale(ctx)
         val defQ = if (hiRes) hiresQuality(ctx) else previewQuality(ctx)
+        val mime = when (format?.lowercase()) {
+            "png", "image/png" -> CaptureFrame.PNG
+            "jpeg", "jpg", "image/jpeg" -> CaptureFrame.JPEG
+            null, "" -> CaptureFrame.JPEG
+            else -> throw IllegalArgumentException("format must be jpeg or png")
+        }
         return CaptureOpts(
             hiRes = hiRes,
             scale = (scale ?: defScale).coerceIn(0.1f, 1f),
             quality = (quality ?: defQ).coerceIn(1, 100),
+            mime = mime,
         )
     }
 

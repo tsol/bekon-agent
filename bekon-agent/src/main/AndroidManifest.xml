@@ -9,6 +9,13 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:extractNativeLibs="true"
@@ -63,6 +70,12 @@
             android:name=".session.CapturePermissionActivity"
             android:exported="false"
             tools:ignore="ScopedStorage" />
+
+        <activity
+            android:name=".access.AccessPromptActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
     </application>
 

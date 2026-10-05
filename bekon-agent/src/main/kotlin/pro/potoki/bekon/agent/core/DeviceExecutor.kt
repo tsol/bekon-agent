@@ -5,6 +5,7 @@ import android.content.Intent
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import pro.potoki.bekon.agent.device.capture.CaptureOpts
+import pro.potoki.bekon.agent.device.capture.CapturePrefs
 import pro.potoki.bekon.agent.device.capture.ScreenCapture
 import pro.potoki.bekon.agent.device.ime.BekonImeService
 import pro.potoki.bekon.agent.device.touch.A11yDump
@@ -70,22 +71,23 @@ class DeviceExecutor(private val context: Context) : ActionExecutor {
                 )
             )
         }
-        val sc = screenCapture
         val (sw, sh) = screenSize
+        val (iw, ih) = CapturePrefs.pixelSize(sw, sh, ScreenshotDefaults.SCALE)
         return ScreenSnapshot(
             screenW = sw,
             screenH = sh,
-            imageW = sc?.width ?: sw,
-            imageH = sc?.height ?: sh,
+            imageW = iw,
+            imageH = ih,
             items = items,
         )
     }
 
-    override fun screenshot(): JpegFrame {
+    override fun screenshot(scale: Float, quality: Int, format: String): JpegFrame {
         val sc = screenCapture ?: throw CapabilityException("capture: media permission not granted")
-        val frame = sc.capture(CaptureOpts(hiRes = true, scale = 0.8f, quality = 70))
-            ?: throw CapabilityException("capture: no frame")
-        return JpegFrame(frame.bytes, frame.width, frame.height)
+        val opts = CapturePrefs.resolve(context, hiRes = true, scale = scale, quality = quality, format = format)
+        val frame = sc.capture(opts) ?: throw CapabilityException("capture: no frame")
+        val (sw, sh) = screenSize
+        return JpegFrame(frame.bytes, frame.width, frame.height, frame.mime, sw, sh)
     }
 
     override fun tap(x: Int, y: Int): Boolean =
@@ -118,6 +120,11 @@ class DeviceExecutor(private val context: Context) : ActionExecutor {
 
     override fun key(name: String, n: Int): Boolean =
         controller()?.key(name, n) ?: throw CapabilityException("touch: accessibility service not enabled")
+
+    override fun clipboard(): String? {
+        controller() ?: throw CapabilityException("touch: accessibility service not enabled")
+        return controller()?.clipboardText()
+    }
 
     override fun nav(action: String): Boolean {
         val c = controller() ?: throw CapabilityException("touch: accessibility service not enabled")

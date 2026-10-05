@@ -21,6 +21,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import pro.potoki.bekon.agent.access.AccessPromptActivity
+import pro.potoki.bekon.agent.access.ClientGate
+import pro.potoki.bekon.agent.access.PrefsTrustedClients
 import pro.potoki.bekon.agent.HomeState
 import pro.potoki.bekon.agent.MainActivity
 import pro.potoki.bekon.agent.SessionPhase
@@ -62,6 +65,32 @@ class SessionService : Service() {
             context.startService(i)
         }
 
+        fun setPaused(paused: Boolean) {
+            if (!_state.value.isRunning) return
+            _state.value = _state.value.copy(paused = paused)
+            instance?.updateNotification(statusText())
+        }
+
+        /** Blocks touch, keys, and navigation. Screen and clipboard read stay open. */
+        fun setReadOnly(on: Boolean) {
+            if (!_state.value.isRunning) return
+            _state.value = _state.value.copy(readOnly = on)
+            instance?.updateNotification(statusText())
+        }
+
+        fun statusText(): String {
+            val s = _state.value
+            val url = s.publicUrl
+            return when {
+                s.paused && url != null -> "Paused · $url"
+                s.paused -> "Paused"
+                s.readOnly && url != null -> "Read only · $url"
+                s.readOnly -> "Read only"
+                url != null -> "Live · $url"
+                else -> "Bekon Agent"
+            }
+        }
+
         /** MediaProjection result returns here (same package). */
         fun onCapturePermissionResult(data: Intent, resultCode: Int) {
             instance?.handleCaptureResult(data, resultCode)
@@ -74,12 +103,17 @@ class SessionService : Service() {
     private var server: LocalServer? = null
     private var tunnel: Tunnel? = null
     private var wakeLock: WakeLock? = null
+    private var gate: ClientGate? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         instance = this
+        gate = ClientGate(
+            PrefsTrustedClients(applicationContext),
+            paused = { _state.value.paused },
+        ) { clientId, ip -> AccessPromptActivity.ask(applicationContext, clientId, ip) }
         createChannel()
         acquireWakeLock()
         Log.i(TAG, "onCreate")
@@ -101,8 +135,8 @@ class SessionService : Service() {
         executor = ex
         scope.launch {
             try {
-                val mcp = McpHandler(ex)
-                val srv = LocalServer(DEFAULT_PORT, ex, mcp) { tunnel?.publicUrl != null }
+                val mcp = McpHandler(ex, gate, readOnly = { _state.value.readOnly }, shortcuts = pro.potoki.bekon.agent.shortcuts.ShortcutStore(applicationContext))
+                val srv = LocalServer(DEFAULT_PORT, ex, mcp, { tunnel?.publicUrl != null }, gate, readOnly = { _state.value.readOnly })
                 srv.start()
                 server = srv
                 refreshState(ex)
@@ -120,7 +154,7 @@ class SessionService : Service() {
         val url = t.start()
         if (url != null) {
             _state.value = _state.value.copy(publicUrl = url)
-            updateNotification("Live · $url")
+            updateNotification(statusText())
         } else {
             _state.value = _state.value.copy(error = "tunnel failed to start")
         }

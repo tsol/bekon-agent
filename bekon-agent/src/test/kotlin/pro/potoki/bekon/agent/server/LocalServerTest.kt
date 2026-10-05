@@ -29,7 +29,8 @@ class FakeExecutor : ActionExecutor {
         screenW = 1080, screenH = 2340, imageW = 540, imageH = 1170,
         items = listOf(UiNode("e1", "YouTube", 540, 900, intArrayOf(390, 810, 690, 990), true)),
     )
-    override fun screenshot(): JpegFrame = JpegFrame(byteArrayOf(1, 2, 3, 4), 10, 10)
+    override fun screenshot(scale: Float, quality: Int, format: String): JpegFrame =
+        JpegFrame(byteArrayOf(1, 2, 3, 4), 10, 10)
     override fun tap(x: Int, y: Int): Boolean { tapCalls++; return true }
     override fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int): Boolean = true
     override fun longPress(x: Int, y: Int): Boolean = true
@@ -37,6 +38,8 @@ class FakeExecutor : ActionExecutor {
     override fun release(): Boolean = true
     override fun type(text: String): Boolean = true
     override fun key(name: String, n: Int): Boolean = true
+    var clipboardText: String? = "copied"
+    override fun clipboard(): String? = clipboardText
     override fun nav(action: String): Boolean = true
 }
 
