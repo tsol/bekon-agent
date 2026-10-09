@@ -8,5 +8,7 @@ interface Tunnel {
     /** Start the tunnel, returning the public URL (or null if it failed). */
     fun start(): String?
     fun stop()
+    /** True while the tunnel process is alive and serving the URL. */
+    fun isAlive(): Boolean
     val publicUrl: String?
 }

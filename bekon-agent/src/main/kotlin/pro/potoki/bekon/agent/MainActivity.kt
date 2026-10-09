@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -115,6 +116,8 @@ class MainActivity : ComponentActivity() {
             is HomeIntent.OpenSettingsScreen -> openSettings(i.row)
             HomeIntent.ShowQr -> { /* QR shown inline from state */ }
             is HomeIntent.SetTunnelKind -> { /* Cloudflare only in phase 1 */ }
+            HomeIntent.AdvanceStep -> SessionService.instance?.advanceStep()
+            HomeIntent.RetryStep -> SessionService.instance?.retryStep()
         }
     }
 
@@ -167,6 +170,7 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
             return
         }
+        SessionService.instance?.reconcileSteps()
         bringUp = false
     }
 
@@ -245,6 +249,9 @@ fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
             state.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
             }
+
+            // Part B/C: frictionless onboarding checklist — one big CTA, progress N/M.
+            SetupCard(state, onIntent)
         }
     }
 
@@ -410,3 +417,66 @@ private fun FooterButton(
 
 /** Short status text for a permission row. */
 private fun pill(on: Boolean): String = if (on) "on" else "off"
+
+/**
+ * Part B: frictionless onboarding checklist. Shows progress N/M, the current missing
+ * capability, and ONE big CTA that deep-links into the right settings screen. On FAILED
+ * it shows Retry instead.
+ */
+@Composable
+private fun SetupCard(state: HomeState, onIntent: (HomeIntent) -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    if (state.phase == SessionPhase.FAILED) {
+        Card {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Session failed", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                state.error?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                Button(onClick = { onIntent(HomeIntent.Start) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Retry")
+                }
+            }
+        }
+        return
+    }
+    val step = state.currentStep
+    if (step == SetupStep.DONE || step == SetupStep.COACH || step == SetupStep.STARTING) return
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(state.stepProgress, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(step.label, style = MaterialTheme.typography.titleMedium)
+            Text(step.body, style = MaterialTheme.typography.bodyMedium)
+            Button(
+                onClick = {
+                    try {
+                        val action = settingsActionFor(step)
+                        val i = if (action == "package:") {
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = android.net.Uri.parse("package:${context.packageName}")
+                            }
+                        } else if (action == "media_projection") {
+                            Intent(context, CapturePermissionActivity::class.java)
+                        } else {
+                            Intent(action)
+                        }
+                        context.startActivity(i)
+                    } catch (e: Exception) {
+                        try { context.startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) {}
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Open settings: ${step.label}")
+            }
+        }
+    }
+}
+
+/** Map a SetupStep to a concrete settings deep-link intent action string. */
+private fun settingsActionFor(step: SetupStep): String = when (step) {
+    SetupStep.NOTIFICATION -> Settings.ACTION_APP_NOTIFICATION_SETTINGS
+    SetupStep.BATTERY -> "package:"
+    SetupStep.SCREEN -> "media_projection"
+    SetupStep.GESTURES -> Settings.ACTION_ACCESSIBILITY_SETTINGS
+    SetupStep.KEYBOARD -> Settings.ACTION_INPUT_METHOD_SETTINGS
+    else -> Settings.ACTION_SETTINGS
+}

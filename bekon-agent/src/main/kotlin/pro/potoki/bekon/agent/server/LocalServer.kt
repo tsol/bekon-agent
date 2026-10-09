@@ -38,7 +38,9 @@ class LocalServer(
     private val readOnly: () -> Boolean = { false },
 ) {
     private var engine: CIOApplicationEngine? = null
+    @Volatile private var running = false
     val boundPort: Int get() = port
+    fun isRunning(): Boolean = running
 
     private val WRITE_PATHS = setOf("/tap", "/swipe", "/type")
 
@@ -160,10 +162,12 @@ class LocalServer(
             get("/mcp") { mcp.handle(call) }
         }
         })
+        running = true
         engine?.start(wait = false)
     }
 
     fun stop() {
+        running = false
         engine?.stop(200, 2000)
         engine = null
     }

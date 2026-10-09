@@ -21,8 +21,13 @@ class CloudflareTunnel(private val context: Context, private val target: String)
 
     override val publicUrl: String? get() = url
 
+    override fun isAlive(): Boolean = process?.isAlive == true && url != null
+
     override fun start(): String? {
-        if (url != null) return url
+        // If we already have a live URL, reuse it (idempotent). Restart path calls
+        // stop() first, which nulls process+url, so this does not block supervision.
+        if (isAlive()) return url
+        if (process?.isAlive == true && url != null) return url
         val bin = locateBinary() ?: return null
         val dir = prepareRuntime()
         val proc = try {

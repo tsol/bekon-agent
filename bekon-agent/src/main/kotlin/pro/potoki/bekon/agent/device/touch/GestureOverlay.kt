@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.PointF
+import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -84,6 +85,22 @@ object GestureOverlay {
             ensureInstalled()
             view?.show(OverlayView.Mark.Swipe(PointF(x1, y1), PointF(x2, y2), label))
         }
+    }
+
+    /**
+     * Part C: persistent coach highlight — a rectangle + label pinned until the step is
+     * done (call [clearCoach]). Falls back to a pull-down banner when bbox is null.
+     */
+    fun showCoach(bbox: Rect?, label: String) {
+        if (!enabled) return
+        main.post {
+            ensureInstalled()
+            view?.showCoach(bbox, label)
+        }
+    }
+
+    fun clearCoach() {
+        main.post { view?.clearCoach() }
     }
 
     private fun ensureInstalled() {
@@ -175,6 +192,22 @@ object GestureOverlay {
         private val banner = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(180, 0, 0, 0)
         }
+        private val coachBx = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 10f; color = Color.argb(255, 66, 133, 244)
+        }
+        private val coachFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL; color = Color.argb(60, 66, 133, 244)
+        }
+        private val coachLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE; textSize = 40f; setShadowLayer(6f, 0f, 2f, Color.BLACK)
+        }
+        private val coachBg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(210, 20, 30, 60)
+        }
+
+        /** Persistent coach marker (Part C). None = no hint pinned right now. */
+        data class Coach(val bbox: Rect?, val label: String)
+        private var coach: Coach? = null
 
         fun show(mark: Mark) {
             marks.addLast(mark)
@@ -184,9 +217,20 @@ object GestureOverlay {
             invalidate()
         }
 
+        fun showCoach(bbox: Rect?, label: String) {
+            coach = Coach(bbox, label)
+            removeCallbacks(hideRunnable)
+            invalidate()
+        }
+
+        fun clearCoach() {
+            coach = null
+            invalidate()
+        }
+
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if (marks.isEmpty()) return
+            if (marks.isEmpty() && coach == null) return
 
             // Gesture coords are display pixels; ColorOS insets this overlay below the
             // status bar / cutout, so (0,0) in the view is not the top of the screen.
@@ -194,6 +238,8 @@ object GestureOverlay {
             getLocationOnScreen(loc)
             val ox = loc[0].toFloat()
             val oy = loc[1].toFloat()
+
+            drawCoach(canvas, ox, oy)
 
             canvas.drawRect(0f, 0f, width.toFloat(), 72f, banner)
             canvas.drawText("Bekon taps (calibration)", 24f, 48f, text)
@@ -229,6 +275,30 @@ object GestureOverlay {
                         drawLabel(canvas, x2, y2 + 90f, m.label)
                     }
                 }
+            }
+        }
+
+        private fun drawCoach(canvas: Canvas, ox: Float, oy: Float) {
+            val c = coach ?: return
+            val box = c.bbox
+            if (box != null) {
+                val l = box.left - ox; val t = box.top - oy
+                val r = box.right - ox; val b = box.bottom - oy
+                canvas.drawRect(l, t, r, b, coachFill)
+                canvas.drawRect(l, t, r, b, coachBx)
+                // label banner above the box
+                val lab = c.label
+                val tw = coachLabelPaint.measureText(lab)
+                val bx0 = ((l + r) / 2f - tw / 2f).coerceIn(8f, width - tw - 8f)
+                val by0 = (t - 56f).coerceAtLeast(8f)
+                canvas.drawRoundRect(bx0 - 12f, by0 - 44f, bx0 + tw + 12f, by0 + 6f, 10f, 10f, coachBg)
+                canvas.drawText(lab, bx0, by0, coachLabelPaint)
+            } else {
+                // no bbox: full-width banner near the top
+                val lab = c.label
+                val w = coachLabelPaint.measureText(lab)
+                canvas.drawRect(0f, 120f, width.toFloat(), 204f, coachBg)
+                canvas.drawText(lab, (width - w) / 2f, 164f, coachLabelPaint)
             }
         }
 

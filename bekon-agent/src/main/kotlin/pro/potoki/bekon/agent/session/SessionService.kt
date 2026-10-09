@@ -7,10 +7,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.PowerManager.WakeLock
+import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +29,7 @@ import pro.potoki.bekon.agent.access.PrefsTrustedClients
 import pro.potoki.bekon.agent.HomeState
 import pro.potoki.bekon.agent.MainActivity
 import pro.potoki.bekon.agent.SessionPhase
+import pro.potoki.bekon.agent.SetupStep
 import pro.potoki.bekon.agent.core.DeviceExecutor
 import pro.potoki.bekon.agent.device.ime.BekonImeService
 import pro.potoki.bekon.agent.device.touch.TouchService
@@ -38,6 +41,15 @@ import pro.potoki.bekon.agent.tunnel.Tunnel
  * Foreground service that owns the whole session: capture, accessibility, keyboard,
  * the local HTTP/MCP server, and cloudflared. If the Activity dies the session keeps
  * running; Stop is explicit. Emits HomeState via a single StateFlow.
+ *
+ * Resilience (HANDOFF-RESILIENCE-OVERNIGHT Part A):
+ *  - startForeground() before any heavy work (Android O+ FGS rule).
+ *  - onStartCommand returns START_STICKY so the system restarts us after a kill.
+ *  - Every exception on start -> phase=FAILED + human-readable lastError + Retry, never a crash.
+ *  - A SessionSupervisor watches the tunnel + local server and restarts them with backoff
+ *    while the capture/gestures stay alive (capture is separate from the tunnel).
+ *  - A StepEngine drives the frictionless onboarding checklist (Part B).
+ *  - Battery optimization + OEM deep-links requested quietly.
  */
 class SessionService : Service() {
     companion object {
@@ -82,10 +94,12 @@ class SessionService : Service() {
             val s = _state.value
             val url = s.publicUrl
             return when {
+                s.phase == SessionPhase.FAILED -> "Failed · ${s.error ?: "unknown"}"
                 s.paused && url != null -> "Paused · $url"
                 s.paused -> "Paused"
                 s.readOnly && url != null -> "Read only · $url"
                 s.readOnly -> "Read only"
+                s.phase == SessionPhase.STARTING -> "Starting…"
                 url != null -> "Live · $url"
                 else -> "Bekon Agent"
             }
@@ -102,6 +116,8 @@ class SessionService : Service() {
     private var executor: DeviceExecutor? = null
     private var server: LocalServer? = null
     private var tunnel: Tunnel? = null
+    private var supervisor: SessionSupervisor? = null
+    private var stepEngine: StepEngine? = null
     private var wakeLock: WakeLock? = null
     private var gate: ClientGate? = null
 
@@ -116,72 +132,209 @@ class SessionService : Service() {
         ) { clientId, ip -> AccessPromptActivity.ask(applicationContext, clientId, ip) }
         createChannel()
         acquireWakeLock()
+        stepEngine = StepEngine(stepDetectors())
+        requestBatteryOptimizationQuietly()
         Log.i(TAG, "onCreate")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification("Bekon Agent"))
+        // FGS must be promoted before any heavy work on Android O+.
+        startForeground(NOTIFICATION_ID, buildNotification(statusText()))
         when (intent?.action) {
             ACTION_START -> startSession()
-            ACTION_STOP -> stopSelf()
+            ACTION_STOP -> stopSession()
+            else -> {
+                // Re-delivery after a system kill (START_STICKY): resume if we were serving.
+                if (_state.value.isRunning || _state.value.phase == SessionPhase.STARTING) {
+                    startSession()
+                }
+            }
         }
         return START_STICKY
     }
 
     private fun startSession() {
-        if (_state.value.isRunning) return
+        if (_state.value.phase == SessionPhase.SERVING) return
         _state.value = _state.value.copy(phase = SessionPhase.STARTING, error = null)
+        updateNotification(statusText())
         val ex = DeviceExecutor(applicationContext)
         executor = ex
         scope.launch {
             try {
-                val mcp = McpHandler(ex, gate, readOnly = { _state.value.readOnly }, shortcuts = pro.potoki.bekon.agent.shortcuts.ShortcutStore(applicationContext))
+                val mcp = McpHandler(
+                    ex, gate,
+                    readOnly = { _state.value.readOnly },
+                    shortcuts = pro.potoki.bekon.agent.shortcuts.ShortcutStore(applicationContext),
+                )
                 val srv = LocalServer(DEFAULT_PORT, ex, mcp, { tunnel?.publicUrl != null }, gate, readOnly = { _state.value.readOnly })
                 srv.start()
                 server = srv
+                startSupervisor(srv)
                 refreshState(ex)
-                startTunnel()
             } catch (e: Exception) {
                 Log.e(TAG, "start failed", e)
-                _state.value = _state.value.copy(phase = SessionPhase.IDLE, error = e.message)
+                fail("start failed: " + (e.message ?: e.javaClass.simpleName))
             }
         }
     }
 
-    private fun startTunnel() {
+    private fun startSupervisor(srv: LocalServer) {
         val t = TunnelFactory.cloudflare(applicationContext, "http://127.0.0.1:$DEFAULT_PORT")
         tunnel = t
-        val url = t.start()
-        if (url != null) {
-            _state.value = _state.value.copy(publicUrl = url)
-            updateNotification(statusText())
-        } else {
-            _state.value = _state.value.copy(error = "tunnel failed to start")
-        }
+        val sup = SessionSupervisor(
+            scope = scope,
+            control = object : TunnelControl {
+                override fun ensureUp(): String? {
+                    if (!srv.isRunning()) {
+                        Log.w(TAG, "local server down — restarting")
+                        srv.start()
+                    }
+                    val t = tunnel
+                    if (t != null && !t.isAlive()) {
+                        Log.w(TAG, "tunnel down — restarting")
+                        t.stop()
+                        t.start()
+                    }
+                    return tunnel?.publicUrl
+                }
+                override fun isHealthy(): Boolean {
+                    return srv.isRunning() && (tunnel?.isAlive() ?: false)
+                }
+            },
+            onUrl = { url ->
+                _state.value = _state.value.copy(publicUrl = url, phase = SessionPhase.SERVING)
+                updateNotification(statusText())
+            },
+            onSessionDown = { reason ->
+                // Tunnel died — keep capture alive, report and let the supervisor restart.
+                Log.w(TAG, "session down: $reason")
+                _state.value = _state.value.copy(publicUrl = null, error = "tunnel down: $reason")
+                updateNotification(statusText())
+            },
+        )
+        supervisor = sup
+        sup.start()
+    }
+
+    private fun stopSession() {
+        Log.i(TAG, "stopSession")
+        supervisor?.stop()
+        supervisor = null
+        try { tunnel?.stop() } catch (_: Exception) {}
+        tunnel = null
+        try { server?.stop() } catch (_: Exception) {}
+        server = null
+        _state.value = HomeState()
+        stopSelf()
     }
 
     private fun refreshState(ex: DeviceExecutor) {
         _state.value = _state.value.copy(
-            phase = SessionPhase.SERVING,
             active = true,
             captureGranted = ex.health()["capture"] ?: false,
             gesturesOn = TouchService.isBound(),
             keyboardOn = BekonImeService.isEnabled(contentResolver),
             keyboardSelected = BekonImeService.isSelected(contentResolver),
         )
+        reconcileSteps()
+        updateNotification(statusText())
     }
 
     fun handleCaptureResult(data: Intent, resultCode: Int) {
         val ex = executor
         if (ex != null) {
-            ex.onCapturePermission(data, resultCode)
-            _state.value = _state.value.copy(captureGranted = true)
-            updateNotification("Capture granted")
+            try {
+                ex.onCapturePermission(data, resultCode)
+                _state.value = _state.value.copy(captureGranted = true)
+                updateNotification("Capture granted")
+            } catch (e: Exception) {
+                Log.e(TAG, "capture grant failed", e)
+                _state.value = _state.value.copy(error = "capture: " + (e.message ?: ""))
+            }
+        }
+        reconcileSteps()
+    }
+
+    // ---- Part B/C: step engine + coach ----
+
+    private fun stepDetectors(): Map<SetupStep, () -> Boolean> = mapOf(
+        SetupStep.NOTIFICATION to {
+            Build.VERSION.SDK_INT < 33 ||
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        },
+        SetupStep.BATTERY to { isEmptyBatteryOptimizations() },
+        SetupStep.SCREEN to { _state.value.captureGranted },
+        SetupStep.GESTURES to { TouchService.isBound() },
+        SetupStep.KEYBOARD to {
+            BekonImeService.isEnabled(contentResolver) && BekonImeService.isSelected(contentResolver)
+        },
+        SetupStep.STARTING to { _state.value.isRunning },
+        SetupStep.COACH to { true },
+        SetupStep.DONE to { true },
+    )
+
+    private fun isEmptyBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT < 23) return true
+        return try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            pm.isIgnoringBatteryOptimizations(packageName)
+        } catch (e: Exception) {
+            Log.w(TAG, "battery check: ${e.message}")
+            true
         }
     }
 
+    fun advanceStep() {
+        val engine = stepEngine ?: return
+        val st = engine.advance(_state.value.stepIndex)
+        _state.value = _state.value.copy(stepIndex = st)
+        emitHint()
+        updateNotification(statusText())
+    }
+
+    fun retryStep() {
+        reconcileSteps()
+        emitHint()
+    }
+
+    /** Re-derive stepIndex from real capability flags (called after onResume from settings). */
+    fun reconcileSteps() {
+        val engine = stepEngine ?: return
+        val missing = engine.reconcile(_state.value.stepIndex)
+        _state.value = _state.value.copy(stepIndex = engine.stepIndex)
+        if (missing != null) emitHint()
+        updateNotification(statusText())
+    }
+
+    private fun emitHint() {
+        val step = _state.value.currentStep
+        val capture = _state.value.captureGranted
+        val tunnelUp = tunnel?.isAlive() ?: false
+        val gesturesOn = TouchService.isBound()
+        // Coach only when capture (or tunnel) is up and something is still off.
+        val callable = capture || tunnelUp
+        if (!callable || step == SetupStep.DONE || step == SetupStep.COACH) return
+        if (gesturesOn) {
+            // Path 1: overlay. We don't have a real bbox here without an a11y snapshot;
+            // the deep-link CTA + label on the banner guides the user.
+            pro.potoki.bekon.agent.device.touch.GestureOverlay.showCoach(null, step.body)
+        }
+        // Path 2/3 handled on the wire: the MCP/HTTP client reads /coach/hint.
+        Log.i(TAG, "coach hint for ${step.name}: ${step.body}")
+    }
+
+    private fun fail(msg: String) {
+        _state.value = _state.value.copy(phase = SessionPhase.FAILED, error = msg, publicUrl = null)
+        updateNotification(statusText())
+    }
+
+    // ---- lifecycle ----
+
     override fun onDestroy() {
         Log.i(TAG, "onDestroy")
+        supervisor?.stop()
+        supervisor = null
         try { tunnel?.stop() } catch (e: Exception) { Log.w(TAG, "tunnel stop ${e.message}") }
         try { server?.stop() } catch (e: Exception) { Log.w(TAG, "server stop ${e.message}") }
         scope.cancel()
@@ -189,6 +342,23 @@ class SessionService : Service() {
         releaseWakeLock()
         if (instance === this) instance = null
         super.onDestroy()
+    }
+
+    private fun requestBatteryOptimizationQuietly() {
+        if (Build.VERSION.SDK_INT < 23) return
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                // Best-effort: if it throws or the device blocks it, ignore (never crash).
+                startActivity(intent)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "battery opt: ${e.message}")
+        }
     }
 
     private fun createChannel() {
