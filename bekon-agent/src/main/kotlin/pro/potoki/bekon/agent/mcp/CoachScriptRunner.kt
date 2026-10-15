@@ -155,7 +155,7 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
                             else throw IllegalStateException("target not found on this screen: reached the end of the list in both directions (rule '${f.rule.id}'). Pick another path (Back, another menu, search).")
                         }
                     }
-                    r.events += Event("${f.rule.id}:${a.type}", r.elapsed(), pkg)
+                    r.events += Event("${f.rule.id}:${eff.type}", r.elapsed(), pkg)
                     lastKey = null
                     synchronized(r.lock) { if (r.status == "running") r.lock.wait(a.settleMs) }
                     continue
