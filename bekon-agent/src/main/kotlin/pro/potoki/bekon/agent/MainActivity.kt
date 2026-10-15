@@ -201,6 +201,24 @@ fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
                 Spacer(Modifier.width(12.dp))
                 Text("Bekon Agent", style = MaterialTheme.typography.headlineSmall)
             }
+            if (state.isRunning) {
+                // Always-visible remote-session indicator with a one-tap Stop (Play policy).
+                Card(
+                    colors = androidx.compose.material3.CardDefaults.cardColors(
+                        containerColor = androidx.compose.ui.graphics.Color(0xFFE8A07A),
+                    ),
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Remote session active — the connected agent can see the screen and act on this phone.",
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = { onIntent(HomeIntent.Stop) }) { Text("Stop") }
+                    }
+                }
+            }
             Card(Modifier.padding(vertical = 8.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatusRow("Screen", pill(state.captureGranted), dimmed = state.paused) { onIntent(HomeIntent.OpenSettingsScreen(SettingsRow.SCREEN)) }
