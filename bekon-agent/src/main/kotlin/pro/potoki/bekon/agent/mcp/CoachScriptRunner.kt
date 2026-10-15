@@ -47,6 +47,7 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
 
     private fun loop(r: Run) {
         var lastKey: String? = null
+        var lastAct: String? = null; var sameAct = 0
         try {
             while (r.status == "running") {
                 if (r.elapsed() >= r.timeoutMs) { r.finish("timeout"); break }
@@ -64,6 +65,9 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
                 val a = f?.rule?.action
                 if (f != null && a != null) {
                     if (++r.actions > MAX_ACTIONS) throw IllegalStateException("more than $MAX_ACTIONS actions; script looks stuck at rule '${f.rule.id}'")
+                    val sig = "${f.rule.id}|${f.targetBounds?.joinToString(",")}|${CoachScript.screenKey(snap.items)}"
+                    sameAct = if (sig == lastAct) sameAct + 1 else 0; lastAct = sig
+                    if (a.type == "tap" && sameAct >= 2) throw IllegalStateException("rule '${f.rule.id}' tapped the same node 3x and the screen did not change")
                     act(a, f, snap.screenW, snap.screenH)
                     r.events += Event("${f.rule.id}:${a.type}", r.elapsed(), pkg)
                     lastKey = null

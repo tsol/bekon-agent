@@ -65,6 +65,9 @@ object CoachScript {
         }
     }
 
+    /** Cheap identity of what is on screen (labels only), to detect a tap that changed nothing. */
+    fun screenKey(items: List<UiNode>): Int = meaningful(items).joinToString("|") { it.label }.hashCode()
+
     val ACTION_TYPES = listOf("tap", "scroll_down", "scroll_up", "back", "home")
 
     /** Tap point for a tap action: explicit target, else the when node (smallest match). */
@@ -94,7 +97,8 @@ object CoachScript {
         return listOf(Shape(Shape.Kind.ARROW, 12f, h * 0.55f, w * 0.3f, h * 0.55f, "$label (свайп от края экрана)", d.color))
     }
 
-    private fun meaningful(items: List<UiNode>) = items.filter { !it.statusBar }
+    /** App content only: status bar and SystemUI nav bar (its "Назад"/"Специальные возможности" keys) never match rules. */
+    private fun meaningful(items: List<UiNode>) = items.filter { !it.statusBar && it.pkg != "com.android.systemui" }
 
     fun matches(w: When, items: List<UiNode>, pkg: String?): Boolean {
         val its = meaningful(items)
