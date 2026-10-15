@@ -152,6 +152,9 @@ class DeviceSetupGuide(
                 (o["extras"] as? JsonObject)?.forEach { (k, v) -> putExtra(k, (v as JsonPrimitive).content.replace("{pkg}", pkg).replace("{label}", label)) }
             }
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Settings apps (e.g. MIUI Security) keep old tasks: without CLEAR_TASK the target
+            // activity is brought to front under a stale stack (Other permissions instead of Autostart).
+            if (o.s("bekon") != "projection") i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
             val what = o.s("component").ifEmpty { o.s("action").ifEmpty { "launcher" } }
             try {
                 ctx.startActivity(i)

@@ -11,7 +11,10 @@ object ScreenDiff {
         return "${n.label}|$b|${if (n.checkable) (if (n.checked) "1" else "0") else "-"}|${if (n.selected) "s" else ""}|${if (n.enabled) "" else "d"}"
     }
 
-    fun meaningful(items: List<UiNode>) = items.filter { !it.statusBar }
+    /** In-app clocks (e.g. MIUI Settings header "0:11") tick every minute: never a change. */
+    private val CLOCK = Regex("^\\s*\\d{1,2}:\\d{2}(\\s?[AaPp]\\.?[Mm]\\.?)?\\s*$")
+
+    fun meaningful(items: List<UiNode>) = items.filter { !it.statusBar && !CLOCK.matches(it.label) }
 
     /** Stable baseline token (16 hex chars, FNV-1a 64) of the meaningful items. */
     fun token(items: List<UiNode>): String {
@@ -59,7 +62,8 @@ object ScreenDiff {
         // 1) same label (+ nearest position), 2) same bounds with a new label.
         val pending = ArrayList<UiNode>()
         for (b in n) {
-            val cands = o.filter { it.label == b.label && it.label.isNotEmpty() }
+            // Same checkable-ness too: an icon "Deny" on one screen is not the radio "Deny" on the next.
+            val cands = o.filter { it.label == b.label && it.label.isNotEmpty() && it.checkable == b.checkable }
             val a = cands.minByOrNull { Math.abs(it.x - b.x) + Math.abs(it.y - b.y) }
             if (a != null) { o.remove(a); cmp(a, b)?.let { changed += Change(b.ref, b.label, it) } } else pending += b
         }
