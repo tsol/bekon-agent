@@ -30,7 +30,7 @@ object CoachScript {
     data class Draw(val type: String, val target: Sel?, val label: String?, val color: Int)
     /** Nav action (needs Accessibility): tap the target node, scroll, or a global nav key. */
     data class Action(val type: String, val target: Sel?, val settleMs: Long)
-    data class Rule(val id: String, val `when`: When, val draw: Draw?, val done: Boolean, val action: Action? = null)
+    data class Rule(val id: String, val `when`: When, val draw: Draw?, val done: Boolean, val action: Action? = null, val once: Boolean = false)
     data class Fired(val rule: Rule, val shapes: List<Shape>, val targetBounds: IntArray?)
 
     fun parse(arr: JsonArray?): List<Rule> {
@@ -61,7 +61,8 @@ object CoachScript {
             }
             val done = (o["done"] as? JsonPrimitive)?.content == "true"
             require(d != null || done || a != null) { "rules[$i] needs draw, do or done:true" }
-            Rule(o.s("id") ?: "r${i + 1}", wh, d, done, a)
+            val once = (o["once"] as? JsonPrimitive)?.content == "true"
+            Rule(o.s("id") ?: "r${i + 1}", wh, d, done, a, once)
         }
     }
 

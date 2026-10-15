@@ -48,12 +48,13 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
     private fun loop(r: Run) {
         var lastKey: String? = null
         var lastAct: String? = null; var sameAct = 0
+        val usedOnce = HashSet<String>()
         try {
             while (r.status == "running") {
                 if (r.elapsed() >= r.timeoutMs) { r.finish("timeout"); break }
                 val snap = executor.snapshot()
                 val pkg = executor.foreground()["package"]
-                val f = CoachScript.evaluate(r.rules, snap.items, pkg, snap.screenW, snap.screenH)
+                val f = CoachScript.evaluate(r.rules.filter { !(it.once && it.id in usedOnce) }, snap.items, pkg, snap.screenW, snap.screenH)
                 val id = f?.rule?.id
                 if (id != r.current) { r.current = id; if (id != null) r.events += Event(id, r.elapsed(), pkg) }
                 val key = f?.let { "${it.rule.id}|${it.targetBounds?.joinToString(",")}" }
@@ -69,6 +70,7 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
                     sameAct = if (sig == lastAct) sameAct + 1 else 0; lastAct = sig
                     if (a.type == "tap" && sameAct >= 2) throw IllegalStateException("rule '${f.rule.id}' tapped the same node 3x and the screen did not change")
                     act(a, f, snap.screenW, snap.screenH)
+                    if (f.rule.once) usedOnce += f.rule.id
                     r.events += Event("${f.rule.id}:${a.type}", r.elapsed(), pkg)
                     lastKey = null
                     synchronized(r.lock) { if (r.status == "running") r.lock.wait(a.settleMs) }
