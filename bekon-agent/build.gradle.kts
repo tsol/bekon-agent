@@ -16,6 +16,22 @@ android {
         versionName = "0.1"
     }
 
+    // full: sideload/dev build, ships the optional Bekon Keys IME.
+    // playStore: Google Play build, no IME in the manifest (typing uses accessibility SET_TEXT/paste).
+    flavorDimensions += "dist"
+    productFlavors {
+        create("full") {
+            dimension = "dist"
+            buildConfigField("boolean", "PLAY_STORE", "false")
+            buildConfigField("boolean", "HAS_IME", "true")
+        }
+        create("playStore") {
+            dimension = "dist"
+            buildConfigField("boolean", "PLAY_STORE", "true")
+            buildConfigField("boolean", "HAS_IME", "false")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -37,6 +53,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
