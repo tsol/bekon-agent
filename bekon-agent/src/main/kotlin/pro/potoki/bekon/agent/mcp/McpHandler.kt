@@ -245,7 +245,59 @@ class McpHandler(
      * Block until the screen meaningfully changes vs [baseline] (or the screen at call time),
      * then wait for the UI to be quiet for debounceMs (capped by settleMaxMs).
      */
+    /** Grayscale grid of the screen (status bar and nav bar cropped) from a projection frame. */
+    private fun pixelGrid(): IntArray? = try {
+        val f = executor.screenshot(0.1f, 60, "jpeg")
+        val bm = android.graphics.BitmapFactory.decodeByteArray(f.bytes, 0, f.bytes.size) ?: null
+        bm?.let {
+            val gw = 27; val gh = 48
+            val top = (it.height * 0.05).toInt(); val bot = (it.height * 0.93).toInt()
+            val out = IntArray(gw * gh)
+            for (j in 0 until gh) for (i in 0 until gw) {
+                val x = (i + 0.5f) * it.width / gw; val y = top + (j + 0.5f) * (bot - top) / gh
+                val c = it.getPixel(x.toInt().coerceIn(0, it.width - 1), y.toInt().coerceIn(0, it.height - 1))
+                out[j * gw + i] = ((c shr 16 and 255) * 3 + (c shr 8 and 255) * 6 + (c and 255)) / 10
+            }
+            it.recycle(); out
+        }
+    } catch (_: Exception) { null }
+
+    /** wait_for_change before Accessibility is on: compare screen-capture frames (no tree, no diff). */
+    private suspend fun waitForChangePixels(args: JsonObject): JsonObject {
+        val timeout = (args.intOr("timeoutMs") ?: WAIT_DEFAULT_MS).coerceIn(0, WAIT_MAX_MS).toLong()
+        val debounce = (args.intOr("debounceMs") ?: 600).coerceIn(0, 5000).toLong()
+        val t0 = System.currentTimeMillis()
+        fun el() = System.currentTimeMillis() - t0
+        fun differs(a: IntArray, b: IntArray) = a.indices.count { Math.abs(a[it] - b[it]) > 24 } > a.size / 50
+        val base = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pixelGrid() }
+            ?: throw CapabilityException("wait_for_change: accessibility is off and screen capture is not running; press Start in Bekon")
+        var changed = false
+        var last = base
+        while (el() < timeout) {
+            kotlinx.coroutines.delay(250)
+            val g = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pixelGrid() } ?: continue
+            if (differs(base, g)) {
+                // settle: until two frames in a row agree (or debounce budget runs out)
+                last = g; val s0 = el()
+                while (el() - s0 < 3000) {
+                    kotlinx.coroutines.delay(debounce.coerceAtLeast(200))
+                    val g2 = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pixelGrid() } ?: break
+                    if (!differs(last, g2)) break
+                    last = g2
+                }
+                changed = differs(base, last); if (changed) break
+            }
+        }
+        return buildJsonObject {
+            put("changed", changed)
+            put("mode", "pixels (accessibility off: no tree, no diff, no baseline)")
+            put("elapsedMs", el())
+            put("summary", (if (changed) "CHANGED (screen pixels)" else "NO CHANGE (timeout)") + " after ${el()}ms. Accessibility is off: take a screenshot/annotate_screenshot to see what the human did.")
+        }
+    }
+
     private suspend fun waitForChange(args: JsonObject): JsonObject {
+        if (executor.health()["touch"] == false) return waitForChangePixels(args)
         val timeout = (args.intOr("timeoutMs") ?: WAIT_DEFAULT_MS).coerceIn(0, WAIT_MAX_MS).toLong()
         val debounce = (args.intOr("debounceMs") ?: 600).coerceIn(0, 5000).toLong()
         val settleMax = (args.intOr("settleMaxMs") ?: 3000).coerceIn(debounce.toInt(), 10000).toLong()
