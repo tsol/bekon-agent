@@ -37,6 +37,10 @@ object ChangeMonitor : ChangeSignal {
             t != AccessibilityEvent.TYPE_VIEW_CLICKED) return
         // Our overlay redraws (coach marks) come as content/windows changes from our package.
         if (pkg == ownPkg && (t == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED || t == AccessibilityEvent.TYPE_WINDOWS_CHANGED)) return
+        // Background content churn from other packages (MIUI widget feed com.mi.android.globalminusscreen
+        // ticks constantly) kept the debounce from ever going quiet, so every wake waited settleMax.
+        if (t == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED && fgPkg.isNotEmpty() && pkg.isNotEmpty() &&
+            pkg != fgPkg && pkg != "com.android.systemui") return
         lastReason = "${AccessibilityEvent.eventTypeToString(t)} $pkg".trim()
         lastEventAt = SystemClock.uptimeMillis()
         seq++

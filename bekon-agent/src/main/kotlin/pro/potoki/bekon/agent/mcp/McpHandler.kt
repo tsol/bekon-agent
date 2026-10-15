@@ -249,6 +249,9 @@ class McpHandler(
         val fin = result ?: cur ?: executor.snapshot()
         val token = remember(fin.items)
         val changed = result != null && token != baseToken
+        // Marks are positioned for the old screen: after a list re-sort/scroll/new window they point at
+        // the wrong control (e.g. another app's Autostart switch). Clear them unless asked to keep.
+        val cleared = changed && args.boolOr("keepMarks") != true && try { coach?.clearScreen(); coach != null } catch (_: Exception) { false }
         val diff = baseItems?.let { pro.potoki.bekon.agent.core.ScreenDiff.diff(it, fin.items) }
         val fg = foregroundJson()
         return buildJsonObject {
@@ -258,6 +261,7 @@ class McpHandler(
             put("window", fg)
             put("baseline", token)
             put("previousBaseline", baseToken)
+            if (cleared) put("coachMarks", "cleared (screen changed); draw the next hint")
             if (diff != null) put("diff", buildJsonObject {
                 put("added", buildJsonArray { diff.added.take(40).forEach { add(buildJsonObject { put("ref", it.ref); put("name", it.label); put("state", pro.potoki.bekon.agent.core.ScreenDiff.state(it).trim()) }) } })
                 put("removed", buildJsonArray { diff.removed.take(40).forEach { add(buildJsonObject { put("name", it.label); put("state", pro.potoki.bekon.agent.core.ScreenDiff.state(it).trim()) }) } })
@@ -411,13 +415,14 @@ class McpHandler(
         tool("snapshot", "Accessibility-tree snapshot of the screen (nodes in screen space). Items carry checkable/checked/selected/enabled (switches, radio rows, checkmarks). Returns a baseline token for wait_for_change.", schema())
         tool(
             "wait_for_change",
-            "Block until the phone screen meaningfully changes (new window, tap result, toggle flipped, text changed), wait until the UI is quiet for debounceMs, then return. Ignores Bekon's own overlay and status-bar clock/icons. Returns changed, reason, elapsedMs, window {package, activity, title}, diff vs baseline (added/removed/changed incl. 'on -> off'), full new items and a new baseline token. On timeout changed=false with the current snapshot: just call again. Coaching loop: coach_draw hint -> wait_for_change -> read diff -> next hint. Never ask the human to say 'done'.",
+            "Block until the phone screen meaningfully changes (new window, tap result, toggle flipped, text changed), wait until the UI is quiet for debounceMs, then return. Ignores Bekon's own overlay and status-bar clock/icons. Returns changed, reason, elapsedMs, window {package, activity, title}, diff vs baseline (added/removed/changed incl. 'on -> off'), full new items and a new baseline token. On a change, coach marks are cleared (they would point at the old layout) unless keepMarks=true. If the row you hinted disappears from the diff (list re-sorted/scrolled), snapshot again and verify its state before moving on. On timeout changed=false with the current snapshot: just call again. Coaching loop: coach_draw hint -> wait_for_change -> read diff -> next hint. Never ask the human to say 'done'.",
             schema {
                 int("timeoutMs", required = false)
                 int("debounceMs", required = false)
                 int("settleMaxMs", required = false)
                 str("baseline", required = false)
                 add("includeScreenshot", buildJsonObject { put("type", "boolean") }, false)
+                add("keepMarks", buildJsonObject { put("type", "boolean") }, false)
             },
         )
         tool(
