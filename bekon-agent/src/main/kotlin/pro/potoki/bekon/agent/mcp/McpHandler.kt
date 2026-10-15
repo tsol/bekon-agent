@@ -210,7 +210,9 @@ class McpHandler(
         "longPress" -> buildJsonObject { put("ok", executor.longPress(args.int("x"), args.int("y"))) }
         "drag" -> buildJsonObject { put("ok", executor.drag(args.int("x"), args.int("y"))) }
         "release" -> buildJsonObject { put("ok", executor.release()) }
-        "type" -> buildJsonObject { put("ok", executor.type(args.str("text"))) }
+        "type" -> buildJsonObject {
+            put("ok", executor.typeText(args.str("text"), replace = args.boolOr("replace") ?: false, asKeys = args.boolOr("asKeys") ?: false))
+        }
         "key" -> {
             val keyName = args.str("name")
             val n = args.intOr("n") ?: 1
@@ -325,7 +327,15 @@ class McpHandler(
         tool("longPress", "Long-press at a screen coordinate", schema { int("x"); int("y") })
         tool("drag", "Press and hold a finger down (release to let go)", schema { int("x"); int("y") })
         tool("release", "Lift a held finger", schema())
-        tool("type", "Type text as key presses into the focused field", schema { str("text") })
+        tool(
+            "type",
+            "Enter text into the focused field. Uses accessibility SET_TEXT (placeholder is never kept), then paste, then key presses. replace=true clears the field first. asKeys=true forces key presses (terminals like Termux; needs the optional Bekon Keys keyboard or Android 13+).",
+            schema {
+                str("text")
+                add("replace", buildJsonObject { put("type", "boolean") }, false)
+                add("asKeys", buildJsonObject { put("type", "boolean") }, false)
+            },
+        )
         tool("key", "Editing key. copy and cut also return the clipboard text.", schema {
             str("name", enum = listOf("backspace", "enter", "clear", "selectAll", "copy", "cut", "paste"))
             int("n", required = false)
@@ -418,6 +428,8 @@ class McpHandler(
         val v = this[key] as? JsonPrimitive ?: return null
         return try { v.content.toFloat() } catch (e: Exception) { null }
     }
+    private fun JsonObject.boolOr(key: String): Boolean? =
+        (this[key] as? JsonPrimitive)?.content?.trim('"')?.toBooleanStrictOrNull()
     private fun JsonObject.str(key: String): String = (this[key] as? JsonPrimitive)?.content ?: ""
     private fun JsonObject.strOr(key: String): String? {
         val s = (this[key] as? JsonPrimitive)?.content ?: return null

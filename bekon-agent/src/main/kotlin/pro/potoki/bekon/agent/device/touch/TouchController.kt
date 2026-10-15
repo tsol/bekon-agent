@@ -97,12 +97,70 @@ class TouchController(private val svc: AccessibilityService) {
     fun home() = svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
     fun recentApps() = svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
 
-    /** Append via SET_TEXT, or type via KeyEvents (`asKeys`) for Termux and similar. */
-    fun input(text: String, asKeys: Boolean = false): Boolean {
+    /**
+     * Put [text] into the focused field without needing a custom keyboard.
+     *
+     * Order: ACTION_SET_TEXT with the full desired string (placeholder stripped, see [TextEntry]),
+     * verified by reading the node back; then select-all/selection + clipboard paste; then
+     * keystrokes through an InputConnection (Bekon Keys IME or the Android 13+ accessibility IME)
+     * as the last resort. [asKeys] forces keystrokes (Termux and other terminals).
+     */
+    fun input(text: String, asKeys: Boolean = false, replace: Boolean = false): Boolean {
         if (asKeys) return inputAsKeys(text)
-        val target = focusedEditable() ?: return false
-        return setText(target, (target.text?.toString() ?: "") + text)
-            || paste(target, text)
+        val target = focusedEditable()
+        if (target != null) {
+            if (setTextSmart(target, text, replace)) return true
+            if (pasteSmart(target, text, replace)) return true
+        }
+        Log.i(TAG, "SET_TEXT/paste unavailable; falling back to keys")
+        if (replace) key("selectAll")
+        return inputAsKeys(text)
+    }
+
+    private fun showingHint(node: AccessibilityNodeInfo): Boolean =
+        Build.VERSION.SDK_INT >= 26 && node.isShowingHintText
+
+    private fun hintOf(node: AccessibilityNodeInfo): CharSequence? =
+        if (Build.VERSION.SDK_INT >= 26) node.hintText else null
+
+    private fun setTextSmart(node: AccessibilityNodeInfo, text: String, replace: Boolean): Boolean {
+        val hasSetText = node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT }
+        if (!hasSetText) return false
+        val hint = hintOf(node)
+        val cur = TextEntry.effectiveCurrent(node.text, hint, showingHint(node))
+        val selS = node.textSelectionStart
+        val selE = node.textSelectionEnd
+        val wanted = TextEntry.desired(cur, text, replace, selS, selE)
+        if (!setText(node, wanted)) return false
+        node.refresh()
+        val after = node.text
+        if (TextEntry.gluedToHint(after, hint, wanted)) {
+            Log.w(TAG, "SET_TEXT glued placeholder; clearing and retrying")
+            setText(node, "")
+            node.refresh()
+            if (!setText(node, wanted)) return false
+        }
+        val caret = TextEntry.cursorAfter(cur, text, replace, selS, selE)
+        val args = Bundle()
+        args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, caret)
+        args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, caret)
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
+        return true
+    }
+
+    private fun pasteSmart(node: AccessibilityNodeInfo, text: String, replace: Boolean): Boolean {
+        val cur = TextEntry.effectiveCurrent(node.text, hintOf(node), showingHint(node))
+        if (replace || cur.isEmpty()) {
+            // Select whatever is there (incl. a placeholder rendered as real text) so paste replaces it.
+            val len = node.text?.length ?: 0
+            if (len > 0) {
+                val args = Bundle()
+                args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, len)
+                if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)) imeContextAction(android.R.id.selectAll)
+            }
+        }
+        return paste(node, text)
     }
 
     fun inputAsKeys(text: String): Boolean {

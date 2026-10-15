@@ -143,6 +143,15 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
         controller()?.inputAsKeys(text)
             ?: throw CapabilityException("touch: accessibility service not enabled")
 
+    override fun typeText(text: String, replace: Boolean, asKeys: Boolean): Boolean {
+        val c = controller() ?: throw CapabilityException("touch: accessibility service not enabled")
+        return try {
+            c.input(text, asKeys = asKeys, replace = replace)
+        } catch (e: Exception) {
+            throw CapabilityException(e.message ?: "type failed")
+        }
+    }
+
     override fun key(name: String, n: Int): Boolean =
         controller()?.key(name, n) ?: throw CapabilityException("touch: accessibility service not enabled")
 

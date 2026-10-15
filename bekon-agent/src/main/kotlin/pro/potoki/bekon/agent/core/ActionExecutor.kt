@@ -82,6 +82,8 @@ interface ActionExecutor {
     fun drag(x: Int, y: Int): Boolean
     fun release(): Boolean
     fun type(text: String): Boolean   // keystrokes (inputAsKeys)
+    /** Accessibility text entry: SET_TEXT (placeholder-safe) -> paste -> keys. */
+    fun typeText(text: String, replace: Boolean = false, asKeys: Boolean = false): Boolean = type(text)
     fun key(name: String, n: Int): Boolean
     /** Plain text on the system clipboard, or null when it is empty. */
     fun clipboard(): String?
