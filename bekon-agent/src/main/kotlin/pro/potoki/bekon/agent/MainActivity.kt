@@ -68,6 +68,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import pro.potoki.bekon.agent.R
 import pro.potoki.bekon.agent.access.PrefsTrustedClients
+import pro.potoki.bekon.agent.consent.Consent
 import pro.potoki.bekon.agent.device.ime.BekonImeService
 import pro.potoki.bekon.agent.device.touch.TouchService
 import pro.potoki.bekon.agent.qr.qrBitmap
@@ -160,16 +161,10 @@ class MainActivity : ComponentActivity() {
         }
         if (!TouchService.isBound() && !askedGestures) {
             askedGestures = true
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            Consent.openAccessibilitySettings(this)
             return
         }
-        val keyboardReady = BekonImeService.isEnabled(contentResolver) &&
-            BekonImeService.isSelected(contentResolver)
-        if (!keyboardReady && !askedKeyboard) {
-            askedKeyboard = true
-            startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-            return
-        }
+        // The Bekon Keys keyboard is optional (typing uses accessibility SET_TEXT); never auto-prompt it.
         SessionService.instance?.reconcileSteps()
         bringUp = false
     }
@@ -177,8 +172,8 @@ class MainActivity : ComponentActivity() {
     private fun openSettings(row: SettingsRow) {
         when (row) {
             SettingsRow.SCREEN -> startActivity(Intent(this, CapturePermissionActivity::class.java))
-            SettingsRow.GESTURES -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            SettingsRow.KEYBOARD -> startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+            SettingsRow.GESTURES -> Consent.openAccessibilitySettings(this)
+            SettingsRow.KEYBOARD -> Consent.openKeyboardSettings(this)
         }
     }
 }
@@ -210,7 +205,9 @@ fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatusRow("Screen", pill(state.captureGranted), dimmed = state.paused) { onIntent(HomeIntent.OpenSettingsScreen(SettingsRow.SCREEN)) }
                     StatusRow("Gestures", pill(state.gesturesOn), dimmed = state.paused || state.readOnly) { onIntent(HomeIntent.OpenSettingsScreen(SettingsRow.GESTURES)) }
-                    StatusRow("Keyboard", pill(state.keyboardOn), dimmed = state.paused || state.readOnly) { onIntent(HomeIntent.OpenSettingsScreen(SettingsRow.KEYBOARD)) }
+                    if (Consent.imeAvailable()) {
+                        StatusRow("Keyboard (optional)", pill(state.keyboardOn), dimmed = state.paused || state.readOnly) { onIntent(HomeIntent.OpenSettingsScreen(SettingsRow.KEYBOARD)) }
+                    }
                     Row(
                         Modifier.fillMaxWidth().padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -252,6 +249,12 @@ fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
 
             // Part B/C: frictionless onboarding checklist — one big CTA, progress N/M.
             SetupCard(state, onIntent)
+
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                TextButton(onClick = { Consent.showDisclosure(ctx, Consent.Kind.A11Y) }) { Text("Accessibility disclosure") }
+                TextButton(onClick = { Consent.openPrivacyPolicy(ctx) }) { Text("Privacy policy") }
+            }
         }
     }
 
@@ -449,6 +452,8 @@ private fun SetupCard(state: HomeState, onIntent: (HomeIntent) -> Unit) {
                 onClick = {
                     try {
                         val action = settingsActionFor(step)
+                        if (step == SetupStep.GESTURES) { Consent.openAccessibilitySettings(context); return@Button }
+                        if (step == SetupStep.KEYBOARD) { Consent.openKeyboardSettings(context); return@Button }
                         val i = if (action == "package:") {
                             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                 data = android.net.Uri.parse("package:${context.packageName}")

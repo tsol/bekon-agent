@@ -129,6 +129,13 @@ class DeviceSetupGuide(
         val st = steps().firstOrNull { it.s("id") == stepId }
             ?: data["common"]!!.jsonArray.map { it.jsonObject }.firstOrNull { it.s("id") == stepId }
             ?: throw IllegalArgumentException("unknown step $stepId; see device_setup_guide")
+        if (st.s("req") == "accessibility" &&
+            !pro.potoki.bekon.agent.consent.Consent.accepted(ctx, pro.potoki.bekon.agent.consent.Consent.Kind.A11Y)
+        ) {
+            // Play policy: the user must see and accept the prominent disclosure first.
+            pro.potoki.bekon.agent.consent.Consent.showDisclosure(ctx, pro.potoki.bekon.agent.consent.Consent.Kind.A11Y)
+            return "opened Bekon's accessibility disclosure; the user must tap Accept before the Accessibility settings open"
+        }
         val pkg = ctx.packageName
         val tried = mutableListOf<String>()
         for (e in st["intents"]?.jsonArray ?: JsonArray(emptyList())) {

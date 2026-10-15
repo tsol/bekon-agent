@@ -325,9 +325,8 @@ class SessionService : Service() {
         SetupStep.BATTERY to { isEmptyBatteryOptimizations() },
         SetupStep.SCREEN to { _state.value.captureGranted },
         SetupStep.GESTURES to { TouchService.isBound() },
-        SetupStep.KEYBOARD to {
-            BekonImeService.isEnabled(contentResolver) && BekonImeService.isSelected(contentResolver)
-        },
+        // Optional: typing works through accessibility SET_TEXT; never block onboarding on the IME.
+        SetupStep.KEYBOARD to { true },
         SetupStep.STARTING to { _state.value.isRunning },
         SetupStep.COACH to { true },
         SetupStep.DONE to { true },

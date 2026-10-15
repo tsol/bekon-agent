@@ -38,9 +38,9 @@ enum class SetupStep(
         "Enable Bekon, then \"Restricted settings\" → App info → ⋮ → Allow restricted settings.",
     ),
     KEYBOARD(
-        "Bekon keyboard",
+        "Bekon keyboard (optional)",
         "android.settings.INPUT_METHOD_SETTINGS",
-        "Enable and select the Bekon keyboard so agent typing works.",
+        "Optional fallback keyboard for apps that reject normal text entry.",
     ),
     STARTING(
         "Start session",

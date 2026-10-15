@@ -111,7 +111,7 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
     }
 
     override fun drawOnScreen(shapes: List<pro.potoki.bekon.agent.coach.Shape>, append: Boolean, ttlMs: Long): Boolean =
-        pro.potoki.bekon.agent.coach.CoachOverlay.show(TouchService.instance, shapes, append, ttlMs)
+        pro.potoki.bekon.agent.coach.CoachOverlay.show(TouchService.active, shapes, append, ttlMs)
 
     override fun clearScreen() = pro.potoki.bekon.agent.coach.CoachOverlay.clear()
 
@@ -170,7 +170,7 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
         }
     }
 
-    private fun controller(): TouchController? = TouchService.instance?.controller
+    private fun controller(): TouchController? = TouchService.active?.controller
 
     private fun resolveName(rn: RawNode, all: List<RawNode>): String =
         NodeNameResolver.resolve(

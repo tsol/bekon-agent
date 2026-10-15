@@ -44,7 +44,7 @@ object A11yDump {
     }
 
     fun dumpJson(): String? {
-        val svc = TouchService.instance ?: return null
+        val svc = TouchService.active ?: return null
         if (Looper.myLooper() == Looper.getMainLooper()) {
             return dumpOnService(svc)
         }
@@ -52,7 +52,7 @@ object A11yDump {
         val latch = CountDownLatch(1)
         Handler(Looper.getMainLooper()).post {
             try {
-                box[0] = dumpOnService(TouchService.instance)
+                box[0] = dumpOnService(TouchService.active)
             } catch (e: Exception) {
                 Log.w(TAG, "dump: ${e.message}")
             } finally {

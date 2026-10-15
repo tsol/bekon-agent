@@ -71,6 +71,11 @@
             tools:ignore="ScopedStorage" />
 
         <activity
+            android:name=".consent.DisclosureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true" />
+
+        <activity
             android:name=".access.AccessPromptActivity"
             android:exported="false"
             android:excludeFromRecents="true"
