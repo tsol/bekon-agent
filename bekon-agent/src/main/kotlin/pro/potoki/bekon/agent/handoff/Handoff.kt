@@ -13,9 +13,9 @@ object Handoff {
         return if (base.endsWith("/mcp")) base else "$base/mcp"
     }
 
+    fun root(url: String): String = url.trim().trimEnd('/').removeSuffix("/mcp")
+
+    /** Very short, token-efficient prompt encoded in the QR and copied by "Copy for agent". */
     fun text(url: String): String =
-        "Bekon Agent MCP (Android remote control). Endpoint: ${endpoint(url)}\n" +
-            "User already shared the screen. Connect as MCP client (JSON-RPC over HTTP POST), list tools, then help the user.\n" +
-            "Core tools: $CORE_TOOLS.\n" +
-            "Confirm on-device if prompted. Stop when the user asks."
+        "Bekon: owner shares Android phone via MCP. Read ${root(url)}/ first."
 }

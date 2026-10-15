@@ -315,56 +315,94 @@ private fun TunnelChoice(kind: TunnelKind, onSet: (TunnelKind) -> Unit) {
 @Composable
 private fun QrScreen(url: String, onDismiss: () -> Unit, onShortcuts: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val prompt = remember(url) { pro.potoki.bekon.agent.handoff.Handoff.text(url) }
     Surface(Modifier.fillMaxSize()) {
         Column(
-            Modifier.padding(32.dp).fillMaxSize(),
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                .padding(horizontal = 28.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
         ) {
+            Text(
+                "Connect your AI agent",
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Scan with the agent's camera, or copy the text below.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(20.dp))
+            val bmp = remember(prompt) { qrBitmap(prompt) }
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = androidx.compose.ui.graphics.Color.White,
+                tonalElevation = 2.dp,
+                shadowElevation = 2.dp,
+            ) {
+                Image(bmp.asImageBitmap(), contentDescription = "QR", Modifier.padding(12.dp).size(256.dp))
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(
+                "Share only with an agent you trust. You approve it on this phone and can stop any time.",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(16.dp))
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    // break after "://" and before the first dot so the long host wraps predictably
+                    url.replaceFirst("://", "://\u200B").replaceFirst(".", "\u200B."),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            Button(
+                onClick = {
+                    cm.setPrimaryClip(ClipData.newPlainText("bekon handoff", prompt))
+                    Toast.makeText(context, "Agent prompt + link copied", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+            ) { Text("Copy for agent") }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    cm.setPrimaryClip(ClipData.newPlainText("bekon url", url))
+                    Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+            ) { Text("Copy URL only") }
+            Spacer(Modifier.height(20.dp))
             val prefs = remember { PrefsTrustedClients(context) }
             var autoAccept by remember { mutableStateOf(prefs.autoAcceptNext()) }
-            if (!BuildConfig.PLAY_STORE) Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
+            if (!BuildConfig.PLAY_STORE) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Checkbox(
                     checked = autoAccept,
                     onCheckedChange = {
                         autoAccept = it
                         prefs.setAutoAcceptNext(it)
                     },
-                    modifier = Modifier.offset(y = (-12).dp),
                 )
                 Text(
                     "Auto accept and remember next connection",
-                    modifier = Modifier.weight(1f).padding(top = 2.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
                 )
             }
-            Spacer(Modifier.height(8.dp))
-            val bmp = remember(url) { qrBitmap(url) }
-            Image(bmp.asImageBitmap(), contentDescription = "QR", Modifier.height(280.dp))
-            Spacer(Modifier.height(16.dp))
-            Text(
-                url,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Spacer(Modifier.height(8.dp))
-            val handoff = remember(url) { pro.potoki.bekon.agent.handoff.Handoff.text(url) }
-            Text(
-                handoff,
-                modifier = Modifier.fillMaxWidth(),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(12.dp))
-            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            Button(onClick = {
-                cm.setPrimaryClip(ClipData.newPlainText("bekon handoff", handoff))
-                Toast.makeText(context, "Link + agent instructions copied", Toast.LENGTH_SHORT).show()
-            }) { Text("Copy for agent") }
-            TextButton(onClick = {
-                cm.setPrimaryClip(ClipData.newPlainText("bekon url", url))
-                Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
-            }) { Text("Copy URL only") }
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onDismiss) { Text("Close") }

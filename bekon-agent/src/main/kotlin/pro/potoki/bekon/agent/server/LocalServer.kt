@@ -15,6 +15,8 @@ import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondText
+import io.ktor.http.withCharset
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
@@ -43,6 +45,7 @@ class LocalServer(
     fun isRunning(): Boolean = running
 
     private val WRITE_PATHS = setOf("/tap", "/swipe", "/type")
+    private val GUIDE_PATHS = setOf("/", "/llms.txt", "/README", "/README.md")
 
     fun start() {
         if (engine != null) return
@@ -63,7 +66,7 @@ class LocalServer(
                 }
                 val path = call.request.path()
                 val g = gate
-                if (g != null && path != "/health" && path != "/mcp") {
+                if (g != null && path != "/health" && path != "/mcp" && path !in GUIDE_PATHS) {
                     val headers = call.request.headers
                     val ip = headers["CF-Connecting-IP"]?.trim()?.takeIf { it.isNotEmpty() }
                         ?: headers["X-Forwarded-For"]?.split(",")?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
@@ -157,6 +160,10 @@ class LocalServer(
                 } catch (e: Exception) {
                     call.respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "bad request"))
                 }
+            }
+            for (p in GUIDE_PATHS) get(p) {
+                val base = pro.potoki.bekon.agent.handoff.Handoff.currentUrl
+                call.respondText(pro.potoki.bekon.agent.handoff.AgentGuide.markdown(base), ContentType.Text.Plain.withCharset(Charsets.UTF_8))
             }
             post("/mcp") { mcp.handle(call) }
             get("/mcp") { mcp.handle(call) }

@@ -3,6 +3,7 @@ package pro.potoki.bekon.agent.mcp
 import io.ktor.http.ContentType
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receiveText
+import io.ktor.server.request.httpMethod
 import io.ktor.server.response.respondText
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -119,6 +120,10 @@ class McpHandler(
 
     suspend fun handle(call: ApplicationCall) {
         val body = try { call.receiveText() } catch (e: Exception) { "" }
+        if (body.isBlank() && call.request.httpMethod == io.ktor.http.HttpMethod.Get) {
+            call.respondText(pro.potoki.bekon.agent.handoff.AgentGuide.MCP_GET_HINT, io.ktor.http.ContentType.Text.Plain)
+            return
+        }
         if (body.isBlank()) { respondJson(call, JsonRpcResponse(id = 0, error = errElement("empty request"))); return }
         val req = try {
             json.decodeFromString(JsonRpcRequest.serializer(), body)
@@ -136,7 +141,7 @@ class McpHandler(
                 put("protocolVersion", "2025-03-26")
                 put("capabilities", buildJsonObject { put("tools", JsonObject(emptyMap())) })
                 put("serverInfo", buildJsonObject { put("name", "bekon-agent"); put("version", "0.1") })
-                put("instructions", ClientGate.INSTRUCTIONS + " " + COACH_INSTRUCTIONS)
+                put("instructions", pro.potoki.bekon.agent.handoff.AgentGuide.SERVER_INSTRUCTIONS)
             }))
             "notifications/initialized" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
             "ping" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
