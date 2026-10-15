@@ -174,6 +174,7 @@ class SessionService : Service() {
                     ex, gate,
                     readOnly = { _state.value.readOnly },
                     shortcuts = pro.potoki.bekon.agent.shortcuts.ShortcutStore(applicationContext),
+                    setup = pro.potoki.bekon.agent.setup.DeviceSetupGuide(applicationContext) { _state.value.captureGranted },
                 )
                 val srv = LocalServer(DEFAULT_PORT, ex, mcp, { tunnel?.publicUrl != null }, gate, readOnly = { _state.value.readOnly })
                 srv.start()

@@ -36,12 +36,13 @@ class McpHandler(
     private val readOnly: () -> Boolean = { false },
     private val shortcuts: ShortcutStore? = null,
     private val coach: pro.potoki.bekon.agent.coach.CoachSurface? = executor as? pro.potoki.bekon.agent.coach.CoachSurface,
+    private val setup: pro.potoki.bekon.agent.setup.DeviceSetupGuide? = null,
 ) {
     companion object {
         const val READ_ONLY = "device is in read-only mode so this action was declined."
         val WRITE_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
-            "coach_draw", "coach_clear",
+            "coach_draw", "coach_clear", "open_setup_screen",
         )
     }
 
@@ -238,6 +239,11 @@ class McpHandler(
             buildJsonObject { put("ok", executor.nav(action)) }
         }
         "shortcuts" -> shortcutStore().listPayload()
+        "device_setup_guide" -> (setup ?: throw CapabilityException("setup guide: not available")).guide()
+        "open_setup_screen" -> {
+            val g = setup ?: throw CapabilityException("setup guide: not available")
+            buildJsonObject { put("ok", true); put("text", g.open(args.str("step"))) }
+        }
         "shortcut_add" -> {
             val saved = shortcutStore().add(args.str("title"), args.str("kind"), args.str("target"))
             buildJsonObject {
@@ -308,6 +314,12 @@ class McpHandler(
             },
         )
         tool("coach_clear", "Remove all coach marks from the phone screen.", schema())
+        tool(
+            "device_setup_guide",
+            "Phone manufacturer/model/SDK/ROM and the ordered OEM-specific setup steps Bekon needs (restricted settings, accessibility, notifications, autostart, battery, background popups, screen capture 'Entire screen'), each with EN/RU text, settings path and live status ok/todo/unknown. Use before coaching a user through setup.",
+            schema(),
+        )
+        tool("open_setup_screen", "Open the best settings screen for a step id from device_setup_guide (tries OEM intents with fallbacks).", schema { str("step") })
         tool("tap", "Tap at screen coordinates", schema { int("x"); int("y") })
         tool("swipe", "Swipe between two points", schema { int("x1"); int("y1"); int("x2"); int("y2"); int("ms", required = false) })
         tool("longPress", "Long-press at a screen coordinate", schema { int("x"); int("y") })
