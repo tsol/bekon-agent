@@ -212,6 +212,7 @@ class SessionService : Service() {
                 }
             },
             onUrl = { url ->
+                pro.potoki.bekon.agent.handoff.Handoff.currentUrl = url
                 _state.value = _state.value.copy(publicUrl = url, phase = SessionPhase.SERVING)
                 updateNotification(statusText())
             },

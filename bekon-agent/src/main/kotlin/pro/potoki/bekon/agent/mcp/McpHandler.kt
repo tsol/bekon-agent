@@ -241,6 +241,13 @@ class McpHandler(
             buildJsonObject { put("ok", executor.nav(action)) }
         }
         "shortcuts" -> shortcutStore().listPayload()
+        "connection_info" -> {
+            val u = pro.potoki.bekon.agent.handoff.Handoff.currentUrl
+            buildJsonObject {
+                put("endpoint", u?.let { pro.potoki.bekon.agent.handoff.Handoff.endpoint(it) } ?: "")
+                put("text", u?.let { pro.potoki.bekon.agent.handoff.Handoff.text(it) } ?: "Bekon Agent MCP (Android remote control). No public tunnel URL yet.")
+            }
+        }
         "device_setup_guide" -> (setup ?: throw CapabilityException("setup guide: not available")).guide()
         "open_setup_screen" -> {
             val g = setup ?: throw CapabilityException("setup guide: not available")
@@ -315,6 +322,7 @@ class McpHandler(
                 int("ttlMs", required = false)
             },
         )
+        tool("connection_info", "Bekon handoff: what this server is, its MCP endpoint and core tools.", schema())
         tool("coach_clear", "Remove all coach marks from the phone screen.", schema())
         tool(
             "device_setup_guide",

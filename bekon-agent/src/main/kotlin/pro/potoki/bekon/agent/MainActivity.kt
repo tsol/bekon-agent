@@ -347,12 +347,24 @@ private fun QrScreen(url: String, onDismiss: () -> Unit, onShortcuts: () -> Unit
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
+            val handoff = remember(url) { pro.potoki.bekon.agent.handoff.Handoff.text(url) }
+            Text(
+                handoff,
+                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             Button(onClick = {
-                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("bekon handoff", handoff))
+                Toast.makeText(context, "Link + agent instructions copied", Toast.LENGTH_SHORT).show()
+            }) { Text("Copy for agent") }
+            TextButton(onClick = {
                 cm.setPrimaryClip(ClipData.newPlainText("bekon url", url))
                 Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
-            }) { Text("Copy link") }
+            }) { Text("Copy URL only") }
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onDismiss) { Text("Close") }
