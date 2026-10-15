@@ -40,4 +40,15 @@ class NodeNameResolverTest {
         val name = NodeNameResolver.resolve(intArrayOf(300, 400, 320, 420), null, null, false, all)
         assertEquals("clickable", name)
     }
+
+    @Test
+    fun `bare switch takes the label of its row`() {
+        val row = listOf(
+            (intArrayOf(0, 1409, 1080, 1579) to "Bekon Agent"),
+            (intArrayOf(231, 1457, 548, 1531) to "Bekon Agent"),
+            (intArrayOf(231, 1627, 614, 1701) to "Bekon Gateway"),
+        )
+        val name = NodeNameResolver.resolve(intArrayOf(868, 1449, 1003, 1538), null, null, true, row, checkable = true)
+        assertEquals("Bekon Agent", name)
+    }
 }

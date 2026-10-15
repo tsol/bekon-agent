@@ -180,6 +180,7 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
         NodeNameResolver.resolve(
             rn.bounds, rn.text, rn.desc, rn.clickable,
             all.map { it.bounds to (it.text ?: it.desc) },
+            checkable = rn.checkable,
         )
 
     private fun realScreenSize(): Pair<Int, Int> {
