@@ -41,6 +41,14 @@ class TouchService : AccessibilityService() {
         super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(e: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(e: AccessibilityEvent?) {
+        if (e?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val pkg = e.packageName?.toString() ?: return
+        // Ignore our own overlays/dialogs and transient system UI (shade, toasts).
+        if (pkg == packageName || pkg == "com.android.systemui") return
+        val cls = e.className?.toString() ?: ""
+        if (!cls.contains("Activity") && !cls.contains("Launcher")) return
+        pro.potoki.bekon.agent.coach.CoachOverlay.onWindowChanged("$pkg/$cls")
+    }
     override fun onInterrupt() {}
 }

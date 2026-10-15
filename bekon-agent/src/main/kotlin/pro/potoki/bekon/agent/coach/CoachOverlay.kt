@@ -21,6 +21,22 @@ object CoachOverlay {
     private var view: MarksView? = null
     private var wm: WindowManager? = null
     private val clearTask = Runnable { clear() }
+    @Volatile private var shownAt = 0L
+    @Volatile private var windowAtShow: String? = null
+    @Volatile private var lastWindow: String? = null
+
+    /**
+     * Marks are drawn in screen coordinates for one specific screen. When the human (or the
+     * agent) moves to another screen they point at the wrong thing, so drop them. A short
+     * grace period ignores the transition that is still settling when the marks are drawn.
+     */
+    fun onWindowChanged(key: String) {
+        lastWindow = key
+        if (view == null || key == windowAtShow) return
+        if (System.currentTimeMillis() - shownAt < 1200) { windowAtShow = key; return }
+        Log.i(TAG, "screen changed ($windowAtShow -> $key): clearing stale marks")
+        clear()
+    }
 
     /** Blocks briefly on the main thread. Returns false when the a11y service is not running. */
     fun show(svc: AccessibilityService?, shapes: List<Shape>, append: Boolean, ttlMs: Long): Boolean {
@@ -33,6 +49,7 @@ object CoachOverlay {
                 v.shapes = if (append) v.shapes + shapes else shapes
                 v.invalidate()
                 main.removeCallbacks(clearTask)
+                shownAt = System.currentTimeMillis(); windowAtShow = lastWindow
                 if (ttlMs > 0) main.postDelayed(clearTask, ttlMs)
                 ok = true
             } catch (e: Exception) {
