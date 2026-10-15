@@ -21,7 +21,7 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
     }
 
     @Volatile var run: Run? = null; private set
-    companion object { const val MAX_ACTIONS = 40 }
+    companion object { const val MAX_ACTIONS = 40; const val MAX_SCROLLS = 16 }
 
     fun start(rules: List<CoachScript.Rule>, timeoutMs: Long, intervalMs: Long): Run {
         stop()
@@ -49,6 +49,9 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
         var lastKey: String? = null
         var lastAct: String? = null; var sameAct = 0
         val usedOnce = HashSet<String>()
+        var scrolls = 0; var flipped = false
+        // Human-scroll watch for arrow hints: a scroll event that leaves the screen unchanged = end of list.
+        var hintKey: Int? = null; var hintSeq = executor.changeSignal()?.seq ?: 0L; var endOfList = false
         try {
             while (r.status == "running") {
                 if (r.elapsed() >= r.timeoutMs) { r.finish("timeout"); break }
@@ -57,7 +60,22 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
                 val f = CoachScript.evaluate(r.rules.filter { !(it.once && it.id in usedOnce) }, snap.items, pkg, snap.screenW, snap.screenH)
                 val id = f?.rule?.id
                 if (id != r.current) { r.current = id; if (id != null) r.events += Event(id, r.elapsed(), pkg) }
-                val key = f?.let { "${it.rule.id}|${it.targetBounds?.joinToString(",")}" }
+                var fd = f
+                val isArrow = f?.rule?.draw?.type?.startsWith("arrow_") == true && f.rule.action == null
+                if (isArrow) {
+                    val k = CoachScript.screenKey(snap.items)
+                    val sig = executor.changeSignal()
+                    if (hintKey == null || hintKey != k) { if (hintKey != null && hintKey != k) endOfList = false; hintKey = k; hintSeq = sig?.seq ?: 0L }
+                    else if (sig != null && sig.seq != hintSeq && sig.lastReason.contains("SCROLLED")) {
+                        if (!endOfList) { endOfList = true; r.events += Event("${f!!.rule.id}:end_of_list", r.elapsed(), pkg) }
+                        hintSeq = sig.seq
+                    }
+                    if (endOfList) {
+                        val d = f!!.rule.draw!!
+                        fd = CoachScript.Fired(f.rule, CoachScript.backHint(CoachScript.Draw("back_hint", null, "Здесь этого нет — нажмите Назад", d.color), snap.items, snap.screenW, snap.screenH), null)
+                    }
+                } else { hintKey = null; endOfList = false }
+                val key = fd?.let { "${it.rule.id}|${it.targetBounds?.joinToString(",")}|$endOfList" }
                 if (f != null && f.rule.done) {
                     r.doneRule = f.rule.id
                     if (f.shapes.isNotEmpty()) coach?.drawOnScreen(f.shapes, false, 1500) else coach?.clearScreen()
@@ -69,8 +87,20 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
                     val sig = "${f.rule.id}|${f.targetBounds?.joinToString(",")}|${CoachScript.screenKey(snap.items)}"
                     sameAct = if (sig == lastAct) sameAct + 1 else 0; lastAct = sig
                     if (a.type == "tap" && sameAct >= 2) throw IllegalStateException("rule '${f.rule.id}' tapped the same node 3x and the screen did not change")
-                    act(a, f, snap.screenW, snap.screenH)
+                    val keyBefore = CoachScript.screenKey(snap.items)
+                    val eff = if (a.type.startsWith("scroll_") && flipped) CoachScript.Action(if (a.type == "scroll_down") "scroll_up" else "scroll_down", a.target, a.settleMs) else a
+                    act(eff, f, snap.screenW, snap.screenH)
                     if (f.rule.once) usedOnce += f.rule.id
+                    if (a.type.startsWith("scroll_")) {
+                        if (++scrolls > MAX_SCROLLS) throw IllegalStateException("target not found on this screen: $MAX_SCROLLS scrolls without a match (rule '${f.rule.id}')")
+                        Thread.sleep(minOf(a.settleMs, 700))
+                        val after = try { CoachScript.screenKey(executor.snapshot().items) } catch (_: Exception) { null }
+                        if (after == keyBefore) {
+                            // End of list: try the other direction once, then give up with a clear reason.
+                            if (!flipped) { flipped = true; r.events += Event("${f.rule.id}:end_of_list->reverse", r.elapsed(), pkg) }
+                            else throw IllegalStateException("target not found on this screen: reached the end of the list in both directions (rule '${f.rule.id}'). Pick another path (Back, another menu, search).")
+                        }
+                    }
                     r.events += Event("${f.rule.id}:${a.type}", r.elapsed(), pkg)
                     lastKey = null
                     synchronized(r.lock) { if (r.status == "running") r.lock.wait(a.settleMs) }
@@ -78,7 +108,7 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
                 }
                 if (key != lastKey) {
                     lastKey = key
-                    if (f == null || f.shapes.isEmpty()) coach?.clearScreen() else coach?.drawOnScreen(f.shapes, false, 0)
+                    if (fd == null || fd.shapes.isEmpty()) coach?.clearScreen() else coach?.drawOnScreen(fd.shapes, false, 0)
                 }
                 synchronized(r.lock) { if (r.status == "running") r.lock.wait(r.intervalMs) }
             }
