@@ -1,5 +1,6 @@
 package pro.potoki.bekon.agent.session
 
+import pro.potoki.bekon.agent.status.AgentStatus.State as StatusState
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -30,6 +31,7 @@ import pro.potoki.bekon.agent.HomeState
 import pro.potoki.bekon.agent.MainActivity
 import pro.potoki.bekon.agent.SessionPhase
 import pro.potoki.bekon.agent.SetupStep
+import pro.potoki.bekon.agent.R
 import pro.potoki.bekon.agent.core.DeviceExecutor
 import pro.potoki.bekon.agent.device.ime.BekonImeService
 import pro.potoki.bekon.agent.device.touch.TouchService
@@ -136,6 +138,11 @@ class SessionService : Service() {
         stepEngine = StepEngine(stepDetectors())
         requestBatteryOptimizationQuietly()
         pro.potoki.bekon.agent.device.capture.ScreenCapture.onSystemStop = { onCaptureLost() }
+        scope.launch {
+            pro.potoki.bekon.agent.status.AgentStatus.current.collect {
+                if (_state.value.isRunning) try { updateNotification(statusText()) } catch (_: Exception) {}
+            }
+        }
         Log.i(TAG, "onCreate")
     }
 
@@ -235,6 +242,7 @@ class SessionService : Service() {
         tunnel = null
         try { server?.stop() } catch (_: Exception) {}
         server = null
+        pro.potoki.bekon.agent.status.AgentStatus.clear()
         _state.value = HomeState()
         stopSelf()
     }
@@ -446,12 +454,24 @@ class SessionService : Service() {
             Intent(this, SessionService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        // agent_status: shown here when it is "done" or when the a11y overlay pill is unavailable.
+        val st = pro.potoki.bekon.agent.status.AgentStatus.current.value
+        val inNotif = st != null && (st.state == StatusState.DONE || !pro.potoki.bekon.agent.device.touch.GestureOverlay.canShowStatus())
+        val title = if (st?.state == StatusState.DONE) getString(R.string.notif_agent_finished) else getString(R.string.notif_session_title)
+        val body = if (inNotif && st != null) {
+            val lab = getString(when (st.state) {
+                StatusState.WORKING -> R.string.status_working; StatusState.WAITING -> R.string.status_waiting
+                StatusState.DONE -> R.string.status_done; StatusState.ERROR -> R.string.status_error
+            })
+            if (st.state == StatusState.DONE) st.text else "$lab · ${st.text}"
+        } else text
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Bekon remote session active")
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop & disconnect", stopPi)
+            .setContentTitle(title)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(if (body != text) "$body\n$text" else body))
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.notif_stop_disconnect), stopPi)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setContentText(text)
+            .setContentText(body)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(pi)
             .setOngoing(true)

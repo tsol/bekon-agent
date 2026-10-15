@@ -10,7 +10,7 @@ import pro.potoki.bekon.agent.mcp.McpHandler
  */
 object AgentGuide {
     /** Same text initialize returns as `instructions`. */
-    val SERVER_INSTRUCTIONS: String get() = ClientGate.INSTRUCTIONS + " " + McpHandler.COACH_INSTRUCTIONS
+    val SERVER_INSTRUCTIONS: String get() = ClientGate.INSTRUCTIONS + " " + McpHandler.COACH_INSTRUCTIONS + " " + McpHandler.STATUS_INSTRUCTIONS
 
     fun markdown(baseUrl: String?): String {
         val base = baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/mcp")?.takeIf { it.isNotEmpty() }
@@ -45,8 +45,13 @@ curl -s $mcp -H 'Content-Type: application/json' -H '$hdr: my-agent-1' \
 - Then `tools/list`, then `tools/call` with `{"name": "...", "arguments": {...}}`.
 - Start with `connection_info`, `device_setup_guide` (what is still off) and `shortcuts`.
 
+## Device language
+- This phone's UI locale is `${pro.potoki.bekon.agent.status.AgentStatus.localeTag()}` (language `${pro.potoki.bekon.agent.status.AgentStatus.language()}`, ${pro.potoki.bekon.agent.status.AgentStatus.languageName()}).
+  Also returned as `deviceInfo` by initialize, connection_info and agent_status. Talk to the human and write agent_status text in this language
+  unless they write to you in another one.
+
 ## Core tools
-snapshot (UI tree with refs + a baseline token), screenshot, annotate_screenshot, tap, swipe, type, key, nav,
+agent_status, snapshot (UI tree with refs + a baseline token), screenshot, annotate_screenshot, tap, swipe, type, key, nav,
 wait_for_change, coach_draw, coach_clear, coach_script, wait_for_script, coach_script_stop, scan_list,
 shortcuts, shortcut_open, device_setup_guide, open_setup_screen, connection_info.
 
@@ -60,6 +65,12 @@ shortcuts, shortcut_open, device_setup_guide, open_setup_screen, connection_info
 - Match on-screen text by "contains", not exact equality (labels vary by MIUI/Android version and language).
 - Use `scan_list` to read a long scrolling list before choosing.
 
+## Status for the human (agent_status)
+- At the start of a task: `agent_status` {state:"working", text:"Настраиваю Wi-Fi…"}.
+- When the human must act: {state:"waiting", text:"Нужны вы: нажмите «Разрешить»"}.
+- When finished: {state:"done", text:"Готово — можно остановить доступ"} (also updates the notification to "Agent finished").
+- {state:"error"} when stuck; {clear:true} to remove. Keep text under ~60 chars, in the human's language.
+
 ## Rules
 - Before Accessibility ("Gestures") is on you cannot tap, snapshot or draw on the phone: only screenshot /
   annotate_screenshot work. Coach the human in chat with annotated screenshots; never tap/swipe for the
@@ -72,7 +83,7 @@ shortcuts, shortcut_open, device_setup_guide, open_setup_screen, connection_info
 
 ## Privacy / stopping
 - Screens may contain private data; use only what the task needs and do not store or forward it.
-- When the task is done or the human says stop: `coach_clear`, stop calling tools, and tell them they can
+- When the task is done or the human says stop: `agent_status` state=done with a short summary, `coach_clear`, stop calling tools, and tell them they can
   press Stop in Bekon (or the notification's "Stop & disconnect"). The link dies when the session stops.
 
 ## Server instructions (identical to initialize.instructions)

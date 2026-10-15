@@ -1,5 +1,6 @@
 package pro.potoki.bekon.agent.device.touch
 
+import pro.potoki.bekon.agent.status.AgentStatus.State as StatusState
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.graphics.Canvas
@@ -37,6 +38,10 @@ object GestureOverlay {
     @Volatile var sessionActive: Boolean = false
         private set
     private var sessionJob: kotlinx.coroutines.Job? = null
+    private var statusJob: kotlinx.coroutines.Job? = null
+
+    /** True when the a11y overlay window is attached and can show the agent_status pill. */
+    fun canShowStatus(): Boolean = host != null && enabled
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
 
     fun updateSessionActive(active: Boolean) {
@@ -57,10 +62,18 @@ object GestureOverlay {
         sessionJob = scope.launch {
             pro.potoki.bekon.agent.session.SessionService.state.collect { updateSessionActive(it.isRunning) }
         }
+        statusJob?.cancel()
+        statusJob = scope.launch {
+            pro.potoki.bekon.agent.status.AgentStatus.current.collect { st ->
+                if (st != null) ensureInstalled()
+                view?.setStatus(st)
+            }
+        }
     }
 
     fun detach() {
         sessionJob?.cancel(); sessionJob = null
+        statusJob?.cancel(); statusJob = null
         main.post {
             val v = view
             val wm = windowManager
@@ -156,6 +169,7 @@ object GestureOverlay {
                 }
             }
             overlay.fitsSystemWindows = false
+            overlay.setStatus(pro.potoki.bekon.agent.status.AgentStatus.current.value)
             wm.addView(overlay, params)
             windowManager = wm
             view = overlay
@@ -227,6 +241,20 @@ object GestureOverlay {
         data class Coach(val bbox: Rect?, val label: String)
         private var coach: Coach? = null
 
+        private var status: pro.potoki.bekon.agent.status.AgentStatus.Status? = null
+        private val pillBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val pillEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.argb(200, 255, 255, 255) }
+        private val pillText = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; typeface = android.graphics.Typeface.DEFAULT_BOLD }
+        private val pillLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(230, 255, 255, 255) }
+        private val icon = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.WHITE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+        private val spinTick = Runnable { invalidate() }
+
+        fun setStatus(s: pro.potoki.bekon.agent.status.AgentStatus.Status?) {
+            status = s
+            removeCallbacks(spinTick)
+            invalidate()
+        }
+
         fun show(mark: Mark) {
             marks.addLast(mark)
             while (marks.size > 6) marks.removeFirst()
@@ -248,7 +276,7 @@ object GestureOverlay {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if (marks.isEmpty() && coach == null && !sessionActive) return
+            if (marks.isEmpty() && coach == null && !sessionActive && status == null) return
 
             // Gesture coords are display pixels; ColorOS insets this overlay below the
             // status bar / cutout, so (0,0) in the view is not the top of the screen.
@@ -265,6 +293,7 @@ object GestureOverlay {
             canvas.restore()
 
             drawCoach(canvas, ox, oy)
+            drawStatus(canvas)
 
             for (m in marks) {
                 when (m) {
@@ -318,6 +347,62 @@ object GestureOverlay {
                 canvas.drawText(lab, bx0, by0, coachLabelPaint)
             }
             // no bbox: no top banner — the bacon frame alone signals coach mode.
+        }
+
+        /** agent_status pill: top-centre inside the bacon frame, below the status bar. */
+        private fun drawStatus(canvas: Canvas) {
+            val st = status ?: return
+            val d = resources.displayMetrics.density
+            val (bg, labelRes) = when (st.state) {
+                StatusState.WORKING -> Color.argb(235, 33, 82, 160) to pro.potoki.bekon.agent.R.string.status_working
+                StatusState.WAITING -> Color.argb(240, 214, 120, 0) to pro.potoki.bekon.agent.R.string.status_waiting
+                StatusState.DONE -> Color.argb(240, 30, 130, 60) to pro.potoki.bekon.agent.R.string.status_done
+                StatusState.ERROR -> Color.argb(240, 190, 40, 40) to pro.potoki.bekon.agent.R.string.status_error
+            }
+            pillBg.color = bg
+            pillText.textSize = 15f * d
+            pillLabel.textSize = 11f * d
+            pillEdge.strokeWidth = 1.5f * d
+            icon.strokeWidth = 2.5f * d
+            val pad = 12f * d
+            val iconSz = 18f * d
+            val maxW = width - 2 * (pro.potoki.bekon.agent.coach.BaconFrame.VISIBLE_DP * d + 12f * d)
+            val label = context.getString(labelRes)
+            val textMax = (maxW - pad * 3 - iconSz).coerceAtLeast(40f * d)
+            val txt = android.text.TextUtils.ellipsize(st.text, android.text.TextPaint(pillText), textMax, android.text.TextUtils.TruncateAt.END).toString()
+            val tw = maxOf(pillText.measureText(txt), pillLabel.measureText(label))
+            val w = pad * 3 + iconSz + tw
+            val h = 46f * d
+            val left = (width - w) / 2f
+            val top = safeTop() + 6f * d
+            val rect = android.graphics.RectF(left, top, left + w, top + h)
+            canvas.drawRoundRect(rect, h / 2, h / 2, pillBg)
+            canvas.drawRoundRect(rect, h / 2, h / 2, pillEdge)
+            val cx = left + pad + iconSz / 2; val cy = top + h / 2; val r = iconSz / 2
+            when (st.state) {
+                StatusState.WORKING -> {
+                    val a = ((System.currentTimeMillis() % 1000L) * 360f / 1000f)
+                    canvas.drawArc(cx - r, cy - r, cx + r, cy + r, a, 270f, false, icon)
+                    postDelayed(spinTick, 50)
+                }
+                StatusState.DONE -> {
+                    val p = android.graphics.Path().apply { moveTo(cx - r * 0.8f, cy); lineTo(cx - r * 0.2f, cy + r * 0.6f); lineTo(cx + r * 0.85f, cy - r * 0.6f) }
+                    canvas.drawPath(p, icon)
+                }
+                StatusState.WAITING -> {
+                    canvas.drawCircle(cx, cy, r, icon)
+                    canvas.drawLine(cx, cy - r * 0.5f, cx, cy + r * 0.1f, icon)
+                    canvas.drawPoint(cx, cy + r * 0.5f, icon)
+                }
+                StatusState.ERROR -> {
+                    canvas.drawCircle(cx, cy, r, icon)
+                    canvas.drawLine(cx - r * 0.45f, cy - r * 0.45f, cx + r * 0.45f, cy + r * 0.45f, icon)
+                    canvas.drawLine(cx + r * 0.45f, cy - r * 0.45f, cx - r * 0.45f, cy + r * 0.45f, icon)
+                }
+            }
+            val tx = left + pad * 2 + iconSz
+            canvas.drawText(label, tx, top + 17f * d, pillLabel)
+            canvas.drawText(txt, tx, top + 36f * d, pillText)
         }
 
         private fun drawLabel(canvas: Canvas, x: Float, y: Float, label: String) {

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="status_working">Работаю…</string>
+    <string name="status_waiting">Нужны вы</string>
+    <string name="status_done">Агент закончил</string>
+    <string name="status_error">Проблема</string>
+    <string name="notif_session_title">Удалённый сеанс Bekon активен</string>
+    <string name="notif_agent_finished">Агент закончил</string>
+    <string name="notif_stop_disconnect">Остановить и отключить</string>
+</resources>

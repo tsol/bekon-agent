@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="status_working">Working…</string>
+    <string name="status_waiting">Your turn</string>
+    <string name="status_done">Agent finished</string>
+    <string name="status_error">Problem</string>
+    <string name="notif_session_title">Bekon remote session active</string>
+    <string name="notif_agent_finished">Agent finished</string>
+    <string name="notif_stop_disconnect">Stop &amp; disconnect</string>
+</resources>

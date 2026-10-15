@@ -54,6 +54,11 @@ class McpHandler(
                 "arrow_down 'Прокрутите ниже' when it is not) and call wait_for_script; the phone moves the highlight itself. " +
                 "Before Accessibility (Gestures) is on you cannot tap, scroll, snapshot or draw on the phone: only screenshot/annotate_screenshot work, " +
                 "so coach the human in chat with annotated screenshots to scroll and tap themselves (never use tap/swipe for the human). Marks are cleared automatically when wait_for_change sees a change."
+        const val STATUS_INSTRUCTIONS =
+            "Keep the human informed on the phone with agent_status (a small pill inside the bacon frame; touches pass through): " +
+                "call agent_status state=working with a short text when you start a task, state=waiting when the human must act (e.g. 'Нужны вы: нажмите Разрешить'), " +
+                "state=error if you are stuck, and state=done with a one-line summary when finished (e.g. 'Готово — можно остановить доступ'). " +
+                "Write the text in the HUMAN's language: use deviceInfo.language from initialize/connection_info/agent_status (device locale, e.g. ru = Russian) unless the human writes to you in another language. Keep it under ~60 characters."
         const val READ_ONLY = "device is in read-only mode so this action was declined."
         val WRITE_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
@@ -142,6 +147,7 @@ class McpHandler(
                 put("capabilities", buildJsonObject { put("tools", JsonObject(emptyMap())) })
                 put("serverInfo", buildJsonObject { put("name", "bekon-agent"); put("version", "0.1") })
                 put("instructions", pro.potoki.bekon.agent.handoff.AgentGuide.SERVER_INSTRUCTIONS)
+                put("deviceInfo", deviceInfoJson())
             }))
             "notifications/initialized" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
             "ping" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
@@ -514,9 +520,34 @@ class McpHandler(
             buildJsonObject { put("ok", executor.nav(action)) }
         }
         "shortcuts" -> shortcutStore().listPayload()
+        "agent_status" -> {
+            val req = pro.potoki.bekon.agent.status.AgentStatus.parse(
+                args.strOr("text"), args.strOr("state"), args.intOr("ttlMs")?.toLong(), args.boolOr("clear"))
+            val st = pro.potoki.bekon.agent.status.AgentStatus.apply(req)
+            val overlay = pro.potoki.bekon.agent.device.touch.GestureOverlay.canShowStatus()
+            buildJsonObject {
+                put("ok", true)
+                put("shown", when {
+                    st == null -> "cleared"
+                    overlay && st.state == pro.potoki.bekon.agent.status.AgentStatus.State.DONE -> "overlay+notification"
+                    overlay -> "overlay"
+                    else -> "notification"
+                })
+                put("deviceInfo", deviceInfoJson())
+                put("text", when {
+                    st == null -> "status cleared"
+                    overlay -> "status '${st.text}' (${st.state.wire}) shown on the phone in the overlay pill" +
+                        (if (st.state == pro.potoki.bekon.agent.status.AgentStatus.State.DONE) " and the session notification ('Agent finished')" else "") +
+                        (if (st.ttlMs > 0) ", auto-clears in ${st.ttlMs} ms" else ", stays until replaced/cleared or the session stops")
+                    else -> "Accessibility (Gestures) overlay is OFF, so the status '${st.text}' (${st.state.wire}) was shown in the ongoing session notification text instead"
+                } + (if (req.truncated) ". Text was truncated to ${pro.potoki.bekon.agent.status.AgentStatus.MAX_CHARS} chars; keep it under ~60." else "") +
+                    ". Device language: ${pro.potoki.bekon.agent.status.AgentStatus.language()} — write status text in the human's language.")
+            }
+        }
         "connection_info" -> {
             val u = pro.potoki.bekon.agent.handoff.Handoff.currentUrl
             buildJsonObject {
+                put("deviceInfo", deviceInfoJson())
                 put("endpoint", u?.let { pro.potoki.bekon.agent.handoff.Handoff.endpoint(it) } ?: "")
                 put("text", u?.let { pro.potoki.bekon.agent.handoff.Handoff.text(it) } ?: "Bekon Agent MCP (Android remote control). No public tunnel URL yet.")
             }
@@ -619,6 +650,19 @@ class McpHandler(
                 int("ttlMs", required = false)
             },
         )
+        tool(
+            "agent_status",
+            "Show a short status line to the human on the phone (pill at the top inside the bacon frame, touches pass through; works across apps). " +
+                "Use it so the human knows what you are doing: state=working at the start of a task, waiting when they must act (e.g. tap Allow), done with a short summary when finished " +
+                "(also updates the notification to 'Agent finished'), error when stuck. Write text in the human's language (deviceInfo.language, e.g. ru). " +
+                "Persists until replaced, clear=true, ttlMs elapses or the session stops. If Accessibility is off it falls back to the session notification text.",
+            schema {
+                add("text", buildJsonObject { put("type", "string"); put("maxLength", pro.potoki.bekon.agent.status.AgentStatus.MAX_CHARS); put("description", "Short message, ≤ ~60 chars, in the human's language") }, false)
+                str("state", enum = listOf("working", "done", "waiting", "error"), required = false)
+                int("ttlMs", required = false)
+                add("clear", buildJsonObject { put("type", "boolean"); put("description", "Remove the status") }, false)
+            },
+        )
         tool("connection_info", "Bekon handoff: what this server is, its MCP endpoint and core tools.", schema())
         tool("coach_clear", "Remove all coach marks from the phone screen (also stops a running coach_script).", schema())
         tool(
@@ -698,6 +742,14 @@ class McpHandler(
         )
         tool("shortcut_open", "Open a saved shortcut by id. An app launches on the phone. A url opens in the browser. A script runs its rules on the phone and waits up to waitMs (default 20s) for done; then use wait_for_script if still running.", schema { str("id"); int("waitMs", required = false) })
         tool("shortcut_remove", "Delete a saved shortcut by id.", schema { str("id") })
+    }
+
+    private fun deviceInfoJson() = buildJsonObject {
+        put("locale", pro.potoki.bekon.agent.status.AgentStatus.localeTag())
+        put("language", pro.potoki.bekon.agent.status.AgentStatus.language())
+        put("languageName", pro.potoki.bekon.agent.status.AgentStatus.languageName())
+        put("manufacturer", android.os.Build.MANUFACTURER ?: "")
+        put("model", android.os.Build.MODEL ?: "")
     }
 
     private fun shortcutStore(): ShortcutStore =
