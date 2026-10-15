@@ -519,7 +519,11 @@ class McpHandler(
         "device_setup_guide" -> (setup ?: throw CapabilityException("setup guide: not available")).guide()
         "open_setup_screen" -> {
             val g = setup ?: throw CapabilityException("setup guide: not available")
-            buildJsonObject { put("ok", true); put("text", g.open(args.str("step")) + ". Next: snapshot, coach_draw a hint on the control to change, then wait_for_change and read the diff. Never wait for a chat reply during setup.") }
+            buildJsonObject { put("ok", true); val opened = g.open(args.str("step"))
+            val next = if (executor.health()["touch"] == false)
+                ". Accessibility is OFF: you cannot snapshot, tap, scroll or draw on the phone. Next: screenshot, annotate_screenshot the control and show it to the human, then wait_for_change (pixel mode) and screenshot again. The human scrolls and taps."
+            else ". Next: coach_script (rules follow scrolling) or snapshot -> coach_draw -> wait_for_change and read the diff. Never wait for a chat reply during setup."
+            put("text", opened + next) }
         }
         "shortcut_add" -> {
             val saved = shortcutStore().add(args.str("title"), args.str("kind"), args.str("target"))
