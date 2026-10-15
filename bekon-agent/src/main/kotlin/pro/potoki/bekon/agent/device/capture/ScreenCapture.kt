@@ -18,6 +18,8 @@ import java.io.ByteArrayOutputStream
 class ScreenCapture(private val context: Context) : CaptureProvider {
     companion object {
         private const val TAG = "ScreenCapture"
+        /** Fired when the OS ends the projection (lock screen, "Stop sharing" chip, etc.). */
+        @Volatile var onSystemStop: (() -> Unit)? = null
         private const val TIMEOUT_MS = 5000L
         private const val SKIP_BLACK_MS = 1500L
         private const val BLACK_CHANNEL = 8
@@ -38,6 +40,7 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
             Log.i(TAG, "MediaProjection stopped by system")
+            try { onSystemStop?.invoke() } catch (e: Exception) { Log.w(TAG, "onSystemStop: ${e.message}") }
             captureHandler.post {
                 releasePreviewDisplay()
                 mediaProjection = null

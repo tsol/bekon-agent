@@ -100,6 +100,7 @@ class SessionService : Service() {
                 s.readOnly && url != null -> "Read only · $url"
                 s.readOnly -> "Read only"
                 s.phase == SessionPhase.STARTING -> "Starting…"
+                url != null && !s.captureGranted -> "Screen not shared · tap to share · $url"
                 url != null -> "Live · $url"
                 else -> "Bekon Agent"
             }
@@ -134,6 +135,7 @@ class SessionService : Service() {
         acquireWakeLock()
         stepEngine = StepEngine(stepDetectors())
         requestBatteryOptimizationQuietly()
+        pro.potoki.bekon.agent.device.capture.ScreenCapture.onSystemStop = { onCaptureLost() }
         Log.i(TAG, "onCreate")
     }
 
@@ -294,6 +296,23 @@ class SessionService : Service() {
         reconcileSteps()
     }
 
+    /**
+     * Android 14+ ends a MediaProjection when the phone locks (STOP_REASON_KEYGUARD) or the
+     * user taps "Stop sharing". Each grant is single-use, so the human must share again.
+     * Reflect that honestly instead of keeping "Live" with a dead screen.
+     */
+    private fun onCaptureLost() {
+        if (!_state.value.captureGranted) return
+        Log.w(TAG, "capture lost: projection stopped by the system")
+        _state.value = _state.value.copy(captureGranted = false)
+        if (_state.value.isRunning && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Drop the mediaProjection FGS type; keep the session (tunnel, gestures) alive.
+            promoteForeground(withProjection = false)
+        }
+        reconcileSteps()
+        updateNotification(statusText())
+    }
+
     // ---- Part B/C: step engine + coach ----
 
     private fun stepDetectors(): Map<SetupStep, () -> Boolean> = mapOf(
@@ -376,6 +395,7 @@ class SessionService : Service() {
         supervisor = null
         try { tunnel?.stop() } catch (e: Exception) { Log.w(TAG, "tunnel stop ${e.message}") }
         try { server?.stop() } catch (e: Exception) { Log.w(TAG, "server stop ${e.message}") }
+        pro.potoki.bekon.agent.device.capture.ScreenCapture.onSystemStop = null
         scope.cancel()
         _state.value = HomeState()
         releaseWakeLock()
