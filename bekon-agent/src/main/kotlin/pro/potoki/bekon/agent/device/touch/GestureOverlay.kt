@@ -15,6 +15,7 @@ import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import kotlinx.coroutines.launch
 
 /**
  * Full-screen calibration overlay drawn via TYPE_ACCESSIBILITY_OVERLAY.
@@ -32,14 +33,34 @@ object GestureOverlay {
 
     @Volatile var enabled: Boolean = true
 
+    /** True while a remote session is running: bacon frame stays on every screen. */
+    @Volatile var sessionActive: Boolean = false
+        private set
+    private var sessionJob: kotlinx.coroutines.Job? = null
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
+
+    fun updateSessionActive(active: Boolean) {
+        main.post {
+            if (sessionActive == active) return@post
+            sessionActive = active
+            if (active) ensureInstalled()
+            view?.invalidate()
+        }
+    }
+
     fun attach(svc: AccessibilityService) {
         host = svc
         enabled = svc.getSharedPreferences("wlya_prefs", Context.MODE_PRIVATE)
             .getBoolean(PREFS_ENABLED, true)
         main.post { install(svc) }
+        sessionJob?.cancel()
+        sessionJob = scope.launch {
+            pro.potoki.bekon.agent.session.SessionService.state.collect { updateSessionActive(it.isRunning) }
+        }
     }
 
     fun detach() {
+        sessionJob?.cancel(); sessionJob = null
         main.post {
             val v = view
             val wm = windowManager
@@ -227,7 +248,7 @@ object GestureOverlay {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if (marks.isEmpty() && coach == null) return
+            if (marks.isEmpty() && coach == null && !sessionActive) return
 
             // Gesture coords are display pixels; ColorOS insets this overlay below the
             // status bar / cutout, so (0,0) in the view is not the top of the screen.
