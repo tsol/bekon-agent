@@ -34,4 +34,11 @@ class CoachScriptTest {
     @Test fun noRuleOtherPackage() {
         assertNull(CoachScript.evaluate(rules, emptyList(), "com.android.settings", 1080, 2340))
     }
+
+    @Test fun backHintCirclesNavBack() {
+        val r = CoachScript.parse(Json.parseToJsonElement("""[{"when":{"textVisible":"Экран блокировки"},"draw":{"type":"back_hint"}}]""") as JsonArray)
+        val items = listOf(UiNode("a", "Экран блокировки", 1, 1, intArrayOf(0, 0, 100, 50)), UiNode("b", "Назад", 763, 2275, intArrayOf(681, 2210, 846, 2340), true))
+        val f = CoachScript.evaluate(r, items, "p", 1080, 2340)!!
+        assertEquals(Shape.Kind.CIRCLE, f.shapes[0].kind); assertEquals(681f, f.shapes[0].x1)
+    }
 }

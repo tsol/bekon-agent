@@ -74,7 +74,25 @@ object CoachScript {
             .minByOrNull { val b = it.bounds!!; (b[2] - b[0]).toLong() * (b[3] - b[1]) }
     }
 
-    val DRAW_TYPES = listOf("circle", "box", "underline", "arrow_up", "arrow_down", "text")
+    val DRAW_TYPES = listOf("circle", "box", "underline", "arrow_up", "arrow_down", "text", "back_hint")
+
+    private val BACK = setOf("назад", "back")
+
+    /** "Press Back" hint: circle the nav-bar Back key when it is in the tree, else point at the bottom edge (gesture nav). */
+    fun backHint(d: Draw, items: List<UiNode>, w: Int, h: Int): List<Shape> {
+        val label = d.label ?: "Нажмите Назад"
+        val key = items.filter { it.bounds != null && it.label.trim().lowercase() in BACK && it.bounds[1] > h * 0.8 }
+            .minByOrNull { it.bounds!![1] }?.bounds
+        if (key != null) {
+            val cx = (key[0] + key[2]) / 2f
+            return listOf(
+                Shape(Shape.Kind.CIRCLE, key[0].toFloat(), key[1].toFloat(), key[2].toFloat(), key[3].toFloat(), null, d.color),
+                Shape(Shape.Kind.ARROW, cx, key[1] - 330f, cx, key[1] - 20f, label, d.color),
+            )
+        }
+        // Gesture navigation: Back is a swipe from the left/right edge.
+        return listOf(Shape(Shape.Kind.ARROW, 12f, h * 0.55f, w * 0.3f, h * 0.55f, "$label (свайп от края экрана)", d.color))
+    }
 
     private fun meaningful(items: List<UiNode>) = items.filter { !it.statusBar }
 
@@ -101,7 +119,7 @@ object CoachScript {
             if (!matches(r.`when`, items, pkg)) continue
             val d = r.draw ?: return Fired(r, emptyList(), r.action?.let { actionTarget(r, items)?.bounds })
             val t = target(r, items)?.bounds
-            val shapes = shapes(d, t, screenW, screenH)
+            val shapes = if (d.type == "back_hint") backHint(d, items, screenW, screenH) else shapes(d, t, screenW, screenH)
             return Fired(r, shapes, t)
         }
         return null

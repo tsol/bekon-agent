@@ -530,7 +530,7 @@ class McpHandler(
             "Upload a mini highlight script the PHONE runs itself (~4x/s) so hints follow scrolling/re-sorting instantly with no agent round-trip. " +
                 "rules: ordered list; each tick the FIRST matching rule fires. A rule may also carry do:{type: tap|scroll_down|scroll_up|back|home, target:{text|contains}, settleMs} (nav action, runs on the phone; same format as script shortcuts). Rule: {id, when:{textVisible|contains, textNotVisible|notContains, package, " +
                 "checked:{text|contains, value}, selected:{text|contains, value}} (all ANDed; empty when = always), draw:{type: circle|box|underline (around the node; " +
-                "target:{text|contains} or the when node; checkable control preferred for checked rules) | arrow_down|arrow_up (scroll hint, centre) | text, label, color}, done:true ends it}. " +
+                "target:{text|contains} or the when node; checkable control preferred for checked rules) | arrow_down|arrow_up (scroll hint, centre) | back_hint (circles the nav-bar Back key, or an edge-swipe arrow on gesture nav; label default 'Нажмите Назад') | text, label, color}, done:true ends it}. " +
                 "Put the done rule first, then the 'target visible' rule, then a fallback scroll-hint rule. Matching is by visible text/contentDescription (no resource ids). " +
                 "Needs Accessibility (Gestures) on: without it there is no node tree and no overlay; use screenshot + annotate_screenshot instead. Starting a script replaces the previous one.",
             schema {
