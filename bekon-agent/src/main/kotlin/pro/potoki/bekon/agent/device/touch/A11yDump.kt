@@ -99,7 +99,8 @@ object A11yDump {
 
     private fun walk(node: AccessibilityNodeInfo, out: JSONArray) {
         if (out.length() >= MAX_NODES) return
-        val text = clip(node.text?.toString())
+        // Never ship password contents off the device.
+        val text = if (node.isPassword) (if (node.text.isNullOrEmpty()) null else "[password hidden]") else clip(node.text?.toString())
         val desc = clip(node.contentDescription?.toString())
         val id = node.viewIdResourceName
         val clickable = node.isClickable

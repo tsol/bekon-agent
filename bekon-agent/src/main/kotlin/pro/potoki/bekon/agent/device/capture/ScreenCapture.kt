@@ -15,6 +15,12 @@ import android.os.HandlerThread
 import android.util.Log
 import java.io.ByteArrayOutputStream
 
+/**
+ * FLAG_SECURE: frames come from a MediaProjection VirtualDisplay created without
+ * VIRTUAL_DISPLAY_FLAG_SECURE (needs the system-only CAPTURE_SECURE_VIDEO_OUTPUT), so
+ * SurfaceFlinger renders every FLAG_SECURE window as black. Secure content is never captured
+ * or transmitted. Do not add VIRTUAL_DISPLAY_FLAG_SECURE or a non-projection screenshot path.
+ */
 class ScreenCapture(private val context: Context) : CaptureProvider {
     companion object {
         private const val TAG = "ScreenCapture"

@@ -49,7 +49,7 @@
             android:foregroundServiceType="mediaProjection|specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Remote device control session: local MCP server and tunnel" />
+                android:value="Remote-assisted screen share: keeps the user-started remote assistance session (local server and tunnel to the agent the user explicitly connected) running while awaiting the MediaProjection screen-capture grant, or after Android revoked it (e.g. lock screen), until the user taps Stop." />
         </service>
 
         <service
