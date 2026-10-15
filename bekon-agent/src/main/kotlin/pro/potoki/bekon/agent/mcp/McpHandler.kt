@@ -56,13 +56,30 @@ class McpHandler(
         const val READ_ONLY = "device is in read-only mode so this action was declined."
         val WRITE_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
-            "coach_draw", "coach_clear", "open_setup_screen", "coach_script", "coach_script_stop",
+            "coach_draw", "coach_clear", "open_setup_screen", "coach_script", "coach_script_stop", "scan_list",
         )
     }
 
 
     private val json = Json { ignoreUnknownKeys = true }
     private val scripts by lazy { CoachScriptRunner(executor, coach) }
+
+    private fun seenJson(seen: CoachScriptRunner.Seen, withPages: Boolean) = buildJsonObject {
+        synchronized(seen) {
+            put("pagesScanned", seen.pageCount)
+            put("items", buildJsonArray { seen.items.values.forEach { it2 -> add(buildJsonObject {
+                put("name", it2.label); put("page", it2.page)
+                if (it2.checkable) put("checked", it2.checked)
+                if (it2.selected) put("selected", true)
+            }) } })
+            if (withPages) put("pages", buildJsonArray { seen.pages.forEach { b -> add(buildJsonObject { put("mime", "image/jpeg"); put("data", Base64.getEncoder().encodeToString(b)) }) } })
+        }
+    }
+
+    private fun seenText(seen: CoachScriptRunner.Seen): String = synchronized(seen) {
+        "\nSeen while scrolling (${seen.pageCount} page(s), ${seen.items.size} items): " +
+            seen.items.values.joinToString("; ") { it.label.take(60) + (if (it.checkable) (if (it.checked) " [on]" else " [off]") else "") }
+    }
 
     private fun scriptJson(r: CoachScriptRunner.Run) = buildJsonObject {
         put("status", r.status)
@@ -71,6 +88,7 @@ class McpHandler(
         r.doneRule?.let { put("doneRule", it) }
         r.error?.let { put("error", it) }
         val ev = synchronized(r.events) { r.events.toList() }
+        if (!r.seen.empty()) put("seen", seenJson(r.seen, r.status == "error"))
         put("fired", buildJsonArray { ev.takeLast(30).forEach { e -> add(buildJsonObject { put("rule", e.ruleId); put("atMs", e.atMs); e.pkg?.let { put("package", it) } }) } })
         put("text", buildString {
             append("script ${r.status} after ${r.elapsed()}ms")
@@ -78,7 +96,8 @@ class McpHandler(
             r.current?.let { if (r.status == "running") append("; showing rule '$it'") }
             r.error?.let { append("; error: $it") }
             if (ev.isNotEmpty()) append("; fired: " + ev.takeLast(12).joinToString(" -> ") { "${it.ruleId}@${it.atMs}ms" })
-            if (r.status == "error") append(". Accessibility (Gestures) is needed for node rules and the overlay; without it use screenshot + annotate_screenshot and ask the human in chat.")
+            if (!r.seen.empty() && r.status == "error") append(seenText(r.seen) + "\nPick the right item yourself (it may be named differently) and continue.")
+            if (r.status == "error" && r.error?.contains("not found") != true) append(". Accessibility (Gestures) is needed for node rules and the overlay; without it use screenshot + annotate_screenshot and ask the human in chat.")
         })
     }
 
@@ -131,7 +150,12 @@ class McpHandler(
                     return
                 }
                 try {
-                    val raw = callTool(name, args)
+                    val pageImgs = ArrayList<JsonObject>()
+                    fun strip(o: JsonObject): JsonObject = JsonObject(o.mapValues { (k, v) ->
+                        if (k == "pages" && v is kotlinx.serialization.json.JsonArray) { v.forEach { (it as? JsonObject)?.let(pageImgs::add) }; JsonPrimitive("${v.size} image(s) in content") }
+                        else if (v is JsonObject) strip(v) else v })
+                    val raw0 = callTool(name, args)
+                    val raw = if (name == "screenshot" || name == "annotate_screenshot") raw0 else strip(raw0)
                     val shot = (raw["screenshot"] as? JsonObject)
                     val data = if (shot != null) JsonObject(raw.filterKeys { it != "screenshot" }) else raw
                     val content: JsonObject = when {
@@ -160,6 +184,10 @@ class McpHandler(
                                 })
                             } else {
                                 add(content)
+                                pageImgs.forEach { pg -> add(buildJsonObject {
+                                    put("type", "image"); put("mimeType", (pg["mime"] as? JsonPrimitive)?.content ?: "image/jpeg")
+                                    put("data", (pg["data"] as? JsonPrimitive)?.content ?: "")
+                                }) }
                                 if (shot != null) add(buildJsonObject {
                                     put("type", "image")
                                     put("mimeType", (shot["mime"] as? JsonPrimitive)?.content ?: "image/jpeg")
@@ -373,6 +401,13 @@ class McpHandler(
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { scripts.await(r, t, onChange) }
             scriptJson(r)
         }
+        "scan_list" -> {
+            val dir = (args["direction"] as? JsonPrimitive)?.content ?: "down"
+            val max = (args.intOr("maxPages") ?: 8).coerceIn(1, 15)
+            val restore = args.boolOr("restore") ?: true
+            val seen = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { scripts.scanList(dir, max, restore) }
+            JsonObject(seenJson(seen, true) + ("text" to JsonPrimitive("scanned list" + seenText(seen))))
+        }
         "coach_script_stop" -> {
             scripts.stop()
             buildJsonObject { put("ok", true); put("text", "script stopped, marks cleared") }
@@ -549,6 +584,15 @@ class McpHandler(
             },
         )
         tool("coach_script_stop", "Stop the running coach_script and clear its marks.", schema())
+        tool(
+            "scan_list",
+            "Scroll the current list to its end (stops when nothing moves, max maxPages) and return the union of all item names with checked states plus compact JPEG page screenshots, then scroll back (restore=true). Use it instead of blind scrolling when looking for a differently named item. Needs Accessibility.",
+            schema {
+                str("direction", enum = listOf("down", "up"), required = false)
+                int("maxPages", required = false)
+                add("restore", buildJsonObject { put("type", "boolean") }, false)
+            },
+        )
         tool(
             "device_setup_guide",
             "Phone manufacturer/model/SDK/ROM and the ordered OEM-specific setup steps Bekon needs (restricted settings, accessibility, notifications, autostart, battery, background popups, screen capture 'Entire screen'), each with EN/RU text, settings path and live status ok/todo/unknown. Use before coaching a user through setup.",
