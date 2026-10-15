@@ -9,10 +9,13 @@ class BekonApp : Application() {
     companion object {
         private const val TAG = "BekonApp"
         const val PREFS = "bekon_prefs"
+        @Volatile var appContext: android.content.Context? = null
+            private set
     }
 
     override fun onCreate() {
         super.onCreate()
+        appContext = applicationContext
         val def = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             Log.e(TAG, "UNCAUGHT on ${t.name}", e)

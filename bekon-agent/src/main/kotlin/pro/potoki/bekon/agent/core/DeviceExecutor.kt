@@ -17,7 +17,7 @@ import org.json.JSONArray
  * Real device executor. Wires the copied gateway device classes behind the
  * ActionExecutor interface so a single implementation serves HTTP and MCP.
  */
-class DeviceExecutor(private val context: Context) : ActionExecutor {
+class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.bekon.agent.coach.CoachSurface {
 
     private var screenCapture: ScreenCapture? = null
     @Volatile private var captureStarted = false
@@ -34,7 +34,7 @@ class DeviceExecutor(private val context: Context) : ActionExecutor {
     }
 
     override fun health(): Map<String, Boolean> = mapOf(
-        "capture" to (captureStarted && screenCapture != null),
+        "capture" to (screenCapture?.isActive == true),
         "touch" to TouchService.isBound(),
         "keyboard" to BekonImeService.isEnabled(context.contentResolver),
         "tunnel" to false, // filled by caller on the wire
@@ -89,6 +89,31 @@ class DeviceExecutor(private val context: Context) : ActionExecutor {
         val (sw, sh) = screenSize
         return JpegFrame(frame.bytes, frame.width, frame.height, frame.mime, sw, sh)
     }
+
+    override fun annotatedScreenshot(
+        shapes: List<pro.potoki.bekon.agent.coach.Shape>, scale: Float, quality: Int, format: String,
+    ): JpegFrame {
+        val sc = screenCapture ?: throw CapabilityException("capture: media permission not granted")
+        val full = sc.latestBitmap() ?: throw CapabilityException("capture: no frame")
+        val (sw, sh) = screenSize
+        val s = scale.coerceIn(0.1f, 1f)
+        val tw = (sw * s).toInt().coerceAtLeast(1); val th = (sh * s).toInt().coerceAtLeast(1)
+        val out = android.graphics.Bitmap.createScaledBitmap(full, tw, th, true)
+            .copy(android.graphics.Bitmap.Config.ARGB_8888, true)
+        full.recycle()
+        // Bitmap is screen-sized * s, so screen coords map by tw/sw.
+        pro.potoki.bekon.agent.coach.SketchPainter.draw(android.graphics.Canvas(out), shapes, tw.toFloat() / sw)
+        val png = format.equals("png", true)
+        val bos = java.io.ByteArrayOutputStream()
+        out.compress(if (png) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG, quality.coerceIn(1, 100), bos)
+        out.recycle()
+        return JpegFrame(bos.toByteArray(), tw, th, if (png) "image/png" else "image/jpeg", sw, sh)
+    }
+
+    override fun drawOnScreen(shapes: List<pro.potoki.bekon.agent.coach.Shape>, append: Boolean, ttlMs: Long): Boolean =
+        pro.potoki.bekon.agent.coach.CoachOverlay.show(TouchService.instance, shapes, append, ttlMs)
+
+    override fun clearScreen() = pro.potoki.bekon.agent.coach.CoachOverlay.clear()
 
     override fun tap(x: Int, y: Int): Boolean =
         controller()?.tap(x.toFloat(), y.toFloat())

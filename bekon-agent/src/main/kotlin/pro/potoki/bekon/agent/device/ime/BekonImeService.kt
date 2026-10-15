@@ -18,16 +18,30 @@ class BekonImeService : InputMethodService() {
         @Volatile var instance: BekonImeService? = null
             private set
 
+        private fun isOurs(id: String?): Boolean =
+            id != null && id.contains("pro.potoki.bekon.agent") && id.contains("BekonImeService")
+
+        /** Settings.Secure.ENABLED_INPUT_METHODS throws SecurityException for targetSdk >= 34; use IMM. */
         fun isEnabled(resolver: android.content.ContentResolver): Boolean {
-            val enabled = Settings.Secure.getString(resolver, Settings.Secure.ENABLED_INPUT_METHODS)
-                ?: return false
-            return enabled.split(':').any { it.contains("pro.potoki.bekon.agent") && it.contains("BekonImeService") }
+            val ctx = pro.potoki.bekon.agent.BekonApp.appContext
+            if (ctx != null) {
+                try {
+                    val imm = ctx.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                    if (imm != null) return imm.enabledInputMethodList.any { isOurs(it.id) }
+                } catch (e: Exception) { Log.w(TAG, "imm enabled list failed", e) }
+            }
+            return try {
+                Settings.Secure.getString(resolver, Settings.Secure.ENABLED_INPUT_METHODS)
+                    ?.split(':')?.any { isOurs(it) } ?: false
+            } catch (e: SecurityException) { false }
         }
 
         fun isSelected(resolver: android.content.ContentResolver): Boolean {
-            val current = Settings.Secure.getString(resolver, Settings.Secure.DEFAULT_INPUT_METHOD)
-                ?: return false
-            return current.contains("pro.potoki.bekon.agent") && current.contains("BekonImeService")
+            return try {
+                isOurs(Settings.Secure.getString(resolver, Settings.Secure.DEFAULT_INPUT_METHOD))
+            } catch (e: SecurityException) {
+                instance != null
+            }
         }
 
         fun statusDetail(resolver: android.content.ContentResolver): String = when {

@@ -35,11 +35,13 @@ class McpHandler(
     private val gate: ClientGate? = null,
     private val readOnly: () -> Boolean = { false },
     private val shortcuts: ShortcutStore? = null,
+    private val coach: pro.potoki.bekon.agent.coach.CoachSurface? = executor as? pro.potoki.bekon.agent.coach.CoachSurface,
 ) {
     companion object {
         const val READ_ONLY = "device is in read-only mode so this action was declined."
         val WRITE_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
+            "coach_draw", "coach_clear",
         )
     }
 
@@ -87,7 +89,7 @@ class McpHandler(
                 try {
                     val data = callTool(name, args)
                     val content: JsonObject = when {
-                        name == "screenshot" -> data
+                        name == "screenshot" || name == "annotate_screenshot" -> data
                         name == "snapshot" -> data
                         else -> {
                             val clip = (data["text"] as? JsonPrimitive)?.content
@@ -96,7 +98,7 @@ class McpHandler(
                     }
                     val toolResult = buildJsonObject {
                         put("content", buildJsonArray {
-                            if (name == "screenshot") {
+                            if (name == "screenshot" || name == "annotate_screenshot") {
                                 val obj = data as JsonObject
                                 val b64 = (obj["data"] as? JsonPrimitive)?.content ?: ""
                                 val mime = (obj["mime"] as? JsonPrimitive)?.content ?: "image/jpeg"
@@ -163,6 +165,38 @@ class McpHandler(
                 put("screenW", f.screenW); put("screenH", f.screenH)
                 put("data", Base64.getEncoder().encodeToString(f.bytes))
             }
+        }
+        "annotate_screenshot" -> {
+            val c = coach ?: throw CapabilityException("coach: not available")
+            val shapes = pro.potoki.bekon.agent.coach.Sketch.parse(args["shapes"] as? kotlinx.serialization.json.JsonArray)
+            val f = c.annotatedScreenshot(
+                shapes,
+                args.floatOr("scale") ?: 0.5f,
+                args.intOr("quality") ?: 80,
+                args.strOr("format") ?: "png",
+            )
+            buildJsonObject {
+                put("mime", f.mime)
+                put("width", f.width); put("height", f.height)
+                put("screenW", f.screenW); put("screenH", f.screenH)
+                put("shapes", shapes.size)
+                put("data", Base64.getEncoder().encodeToString(f.bytes))
+            }
+        }
+        "coach_draw" -> {
+            val c = coach ?: throw CapabilityException("coach: not available")
+            val shapes = pro.potoki.bekon.agent.coach.Sketch.parse(args["shapes"] as? kotlinx.serialization.json.JsonArray)
+            val append = (args["append"] as? JsonPrimitive)?.content == "true"
+            val ttl = (args.intOr("ttlMs") ?: 0).toLong()
+            if (!c.drawOnScreen(shapes, append, ttl)) {
+                throw CapabilityException("overlay: accessibility service (Gestures) is off. Use annotate_screenshot and show the image to the user instead.")
+            }
+            buildJsonObject { put("ok", true); put("text", "drew ${shapes.size} mark(s) on the phone screen") }
+        }
+        "coach_clear" -> {
+            val c = coach ?: throw CapabilityException("coach: not available")
+            c.clearScreen()
+            buildJsonObject { put("ok", true); put("text", "cleared") }
         }
         "tap" -> buildJsonObject { put("ok", executor.tap(args.int("x"), args.int("y"))) }
         "swipe" -> {
@@ -236,6 +270,41 @@ class McpHandler(
                 str("format", enum = listOf("jpeg", "png"), required = false)
             },
         )
+        val shapesSchema = buildJsonObject {
+            put("type", "array")
+            put("description", "Marks in real SCREEN coordinates (same as snapshot/tap). Items: {type:box,x,y,w,h | bounds:[l,t,r,b]}, {type:circle,x,y,r | bounds}, {type:arrow,x1,y1,x2,y2} (head at x2,y2), {type:underline,x1,y1,x2[,y2] | bounds}, {type:text,x,y,label}. Optional label (short, e.g. 'tap here') and color (red/green/blue/yellow/orange or #rrggbb).")
+            put("items", buildJsonObject {
+                put("type", "object")
+                put("properties", buildJsonObject {
+                    put("type", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { pro.potoki.bekon.agent.coach.Sketch.KINDS.forEach { add(JsonPrimitive(it)) } }) })
+                    for (k in listOf("x", "y", "w", "h", "r", "x1", "y1", "x2", "y2")) put(k, buildJsonObject { put("type", "number") })
+                    put("bounds", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "number") }) })
+                    put("label", buildJsonObject { put("type", "string") })
+                    put("color", buildJsonObject { put("type", "string") })
+                })
+                put("required", buildJsonArray { add(JsonPrimitive("type")) })
+            })
+        }
+        tool(
+            "annotate_screenshot",
+            "Coach the human in chat: screenshot with hand-drawn boxes/circles/arrows/labels drawn on it. Returns an image (default png, scale 0.5) you can show or save. Works whenever screen capture is on.",
+            schema {
+                add("shapes", shapesSchema, true)
+                num("scale", required = false)
+                int("quality", required = false)
+                str("format", enum = listOf("png", "jpeg"), required = false)
+            },
+        )
+        tool(
+            "coach_draw",
+            "Coach the human live: draw hand-drawn circles/boxes/arrows/underlines/labels directly on the phone screen (accessibility overlay; touches pass through). Replaces previous marks unless append=true. ttlMs>0 auto-clears. Needs Gestures (accessibility) on; otherwise use annotate_screenshot.",
+            schema {
+                add("shapes", shapesSchema, true)
+                add("append", buildJsonObject { put("type", "boolean") }, false)
+                int("ttlMs", required = false)
+            },
+        )
+        tool("coach_clear", "Remove all coach marks from the phone screen.", schema())
         tool("tap", "Tap at screen coordinates", schema { int("x"); int("y") })
         tool("swipe", "Swipe between two points", schema { int("x1"); int("y1"); int("x2"); int("y2"); int("ms", required = false) })
         tool("longPress", "Long-press at a screen coordinate", schema { int("x"); int("y") })
