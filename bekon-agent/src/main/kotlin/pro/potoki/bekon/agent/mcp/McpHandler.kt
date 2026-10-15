@@ -90,7 +90,8 @@ class McpHandler(
                     val data = callTool(name, args)
                     val content: JsonObject = when {
                         name == "screenshot" || name == "annotate_screenshot" -> data
-                        name == "snapshot" -> data
+                        // MCP content items must carry a type; ship the tree as JSON text.
+                        name == "snapshot" -> buildJsonObject { put("type", "text"); put("text", data.toString()) }
                         else -> {
                             val clip = (data["text"] as? JsonPrimitive)?.content
                             buildJsonObject { put("type", "text"); put("text", clip ?: "ok") }
@@ -111,7 +112,9 @@ class McpHandler(
                                 add(content)
                             }
                         })
-                        put("structuredContent", data)
+                        // Don't ship the image twice (content + structuredContent) over the tunnel.
+                        put("structuredContent", if (name == "screenshot" || name == "annotate_screenshot")
+                            JsonObject(data.filterKeys { it != "data" }) else data)
                         put("isError", false)
                     }
                     respondJson(call, JsonRpcResponse(id = id, result = toolResult))
