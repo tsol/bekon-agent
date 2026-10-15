@@ -304,7 +304,7 @@ class SessionService : Service() {
     private fun onCaptureLost() {
         if (!_state.value.captureGranted) return
         Log.w(TAG, "capture lost: projection stopped by the system")
-        _state.value = _state.value.copy(captureGranted = false)
+        _state.value = _state.value.copy(captureGranted = false, stepIndex = 0) // re-derive: SCREEN is missing again
         if (_state.value.isRunning && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // Drop the mediaProjection FGS type; keep the session (tunnel, gestures) alive.
             promoteForeground(withProjection = false)
