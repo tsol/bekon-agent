@@ -139,7 +139,14 @@ class SessionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // FGS must be promoted before any heavy work on Android O+.
-        startForeground(NOTIFICATION_ID, buildNotification(statusText()))
+        // Never use the mediaProjection type here: on Android 14 it requires a fresh projection
+        // grant, which a sticky restart / auto-start does not have. Projection type is added in
+        // handleCaptureResult() once the user actually grants capture.
+        if (!promoteForeground(withProjection = false)) {
+            Log.w(TAG, "cannot enter foreground; stopping gracefully")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         when (intent?.action) {
             ACTION_START -> startSession()
             ACTION_STOP -> stopSession()
@@ -240,9 +247,41 @@ class SessionService : Service() {
         updateNotification(statusText())
     }
 
+    /** Returns false if the system refused the foreground promotion. */
+    private fun promoteForeground(withProjection: Boolean): Boolean {
+        val notification = buildNotification(statusText())
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                var type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                if (withProjection) type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                startForeground(NOTIFICATION_ID, notification, type)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // specialUse type doesn't exist pre-14; manifest types are filtered by the OS.
+                val type = if (withProjection) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                    else android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE
+                startForeground(NOTIFICATION_ID, notification, type)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            true
+        } catch (e: SecurityException) {
+            Log.e(TAG, "startForeground(projection=$withProjection) refused", e)
+            false
+        } catch (e: IllegalStateException) {
+            // e.g. ForegroundServiceStartNotAllowedException
+            Log.e(TAG, "startForeground(projection=$withProjection) not allowed", e)
+            false
+        }
+    }
+
     fun handleCaptureResult(data: Intent, resultCode: Int) {
         val ex = executor
         if (ex != null) {
+            if (!promoteForeground(withProjection = true)) {
+                _state.value = _state.value.copy(error = "capture: foreground projection refused")
+                reconcileSteps()
+                return
+            }
             try {
                 ex.onCapturePermission(data, resultCode)
                 _state.value = _state.value.copy(captureGranted = true)
