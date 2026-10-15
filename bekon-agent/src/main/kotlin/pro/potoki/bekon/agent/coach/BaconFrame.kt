@@ -9,9 +9,15 @@ import kotlin.math.sin
 
 /**
  * Branded "frying bacon" frame drawn along all four screen edges while coach / gesture
- * marks are visible. Thin strips only (~30dp); centre content is never covered.
+ * marks are visible. The ~30dp strip is shifted half off-screen so only ~15dp is visible,
+ * and drawn at ~25% opacity; centre content is never covered.
  */
 object BaconFrame {
+    const val THICK_DP = 30f
+    /** Visible width of the strip on screen (half of [THICK_DP]). Use for label safe insets. */
+    const val VISIBLE_DP = THICK_DP / 2f
+    private const val ALPHA = 64 // ~0.25
+
     private val meat = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.rgb(214, 86, 92) }
     private val crisp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND
@@ -25,15 +31,18 @@ object BaconFrame {
 
     /** [phase] in 0..1 animates the wave (sizzle). */
     fun draw(canvas: Canvas, w: Float, h: Float, density: Float, phase: Float = 0f) {
-        val t = 30f * density
+        val t = THICK_DP * density
+        val o = t / 2f // outward offset: half the strip is off-screen
         crisp.strokeWidth = 3.2f * density
         char.strokeWidth = 1.4f * density
         fat.strokeWidth = 2.6f * density
         // top, bottom (horizontal); left, right (vertical, inset by t to avoid corner overlap)
-        strip(canvas, 0f, 0f, w, true, t, density, phase, 1)
-        strip(canvas, 0f, h - t, w, true, t, density, phase, 2)
-        strip(canvas, 0f, t, h - 2 * t, false, t, density, phase, 3)
-        strip(canvas, w - t, t, h - 2 * t, false, t, density, phase, 4)
+        val sc = canvas.saveLayerAlpha(0f, 0f, w, h, ALPHA)
+        strip(canvas, 0f, -o, w, true, t, density, phase, 1)
+        strip(canvas, 0f, h - t + o, w, true, t, density, phase, 2)
+        strip(canvas, -o, t - o, h - 2 * (t - o), false, t, density, phase, 3)
+        strip(canvas, w - t + o, t - o, h - 2 * (t - o), false, t, density, phase, 4)
+        canvas.restoreToCount(sc)
     }
 
     private fun strip(c: Canvas, x0: Float, y0: Float, len: Float, horiz: Boolean, t: Float, d: Float, phase: Float, seed: Int) {

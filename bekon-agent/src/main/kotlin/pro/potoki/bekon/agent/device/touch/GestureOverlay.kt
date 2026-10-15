@@ -312,12 +312,12 @@ object GestureOverlay {
             val loc = IntArray(2); getLocationOnScreen(loc)
             val ins = rootWindowInsets
             val sys = if (ins != null) maxOf(ins.stableInsetTop, ins.displayCutout?.safeInsetTop ?: 0) else 0
-            return (maxOf(sys, (resources.displayMetrics.density * 30).toInt()) - loc[1]).coerceAtLeast(0).toFloat() + 8f
+            return (maxOf(sys, (resources.displayMetrics.density * pro.potoki.bekon.agent.coach.BaconFrame.VISIBLE_DP).toInt()) - loc[1]).coerceAtLeast(0).toFloat() + 8f
         }
         private fun safeBottom(): Float {
             val ins = rootWindowInsets
             val sys = ins?.stableInsetBottom ?: 0
-            return (maxOf(sys, 0) + resources.displayMetrics.density * 30).toFloat() + 8f
+            return (maxOf(sys, 0) + resources.displayMetrics.density * pro.potoki.bekon.agent.coach.BaconFrame.VISIBLE_DP).toFloat() + 8f
         }
     }
 }

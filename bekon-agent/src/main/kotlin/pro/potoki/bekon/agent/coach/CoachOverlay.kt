@@ -102,7 +102,7 @@ object CoachOverlay {
             val sh = dm.heightPixels.toFloat().coerceAtLeast(height + loc[1].toFloat())
             if (shapes.isNotEmpty()) BaconFrame.draw(canvas, sw, sh, dm.density)
             val ins = rootWindowInsets
-            val strip = 30f * dm.density
+            val strip = BaconFrame.VISIBLE_DP * dm.density
             val top = maxOf(strip, (ins?.stableInsetTop ?: 0).toFloat(), (ins?.displayCutout?.safeInsetTop ?: 0).toFloat()) + 6f
             val bottom = maxOf(strip, (ins?.stableInsetBottom ?: 0).toFloat()) + 6f
             SketchPainter.draw(canvas, shapes, 1f, dm.density, safeTop = top, safeBottom = bottom, safeSide = strip + 4f, areaW = sw, areaH = sh)
