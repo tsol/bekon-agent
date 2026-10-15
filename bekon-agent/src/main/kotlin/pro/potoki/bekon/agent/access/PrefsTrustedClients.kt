@@ -5,7 +5,9 @@ import android.content.Context
 class PrefsTrustedClients(context: Context) : TrustedClients {
     private val prefs = context.applicationContext.getSharedPreferences("bekon_clients", Context.MODE_PRIVATE)
 
-    override fun autoAcceptNext(): Boolean = prefs.getBoolean(AUTO, true)
+    // Off by default: every new agent needs an explicit Allow on the phone. The Play build ignores the toggle.
+    override fun autoAcceptNext(): Boolean =
+        !pro.potoki.bekon.agent.BuildConfig.PLAY_STORE && prefs.getBoolean(AUTO, false)
 
     override fun trusted(): Set<String> = prefs.getStringSet(IDS, emptySet())?.toSet() ?: emptySet()
 

@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import pro.potoki.bekon.agent.R
+import pro.potoki.bekon.agent.BuildConfig
 import pro.potoki.bekon.agent.access.PrefsTrustedClients
 import pro.potoki.bekon.agent.consent.Consent
 import pro.potoki.bekon.agent.device.ime.BekonImeService
@@ -322,7 +323,7 @@ private fun QrScreen(url: String, onDismiss: () -> Unit, onShortcuts: () -> Unit
         ) {
             val prefs = remember { PrefsTrustedClients(context) }
             var autoAccept by remember { mutableStateOf(prefs.autoAcceptNext()) }
-            Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
+            if (!BuildConfig.PLAY_STORE) Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
                 Checkbox(
                     checked = autoAccept,
                     onCheckedChange = {
