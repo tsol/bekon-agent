@@ -9,6 +9,8 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,9 +29,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 class PrivacyPolicyActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
+                  androidx.compose.foundation.layout.Box(Modifier.safeDrawingPadding()) {
                     Column(Modifier.fillMaxSize()) {
                         AndroidView(
                             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -58,6 +62,7 @@ class PrivacyPolicyActivity : ComponentActivity() {
                     }
                 }
             }
+                }
         }
     }
 

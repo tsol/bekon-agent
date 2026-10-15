@@ -53,6 +53,14 @@ object GestureOverlay {
         }
     }
 
+    /** Remove coach banner, gesture marks, agent_status pill and coach marks. */
+    fun clearAllSessionVisuals() {
+        main.post {
+            view?.clearAll()
+        }
+        try { pro.potoki.bekon.agent.coach.CoachOverlay.clear() } catch (_: Exception) {}
+    }
+
     fun attach(svc: AccessibilityService) {
         host = svc
         enabled = svc.getSharedPreferences("wlya_prefs", Context.MODE_PRIVATE)
@@ -60,7 +68,12 @@ object GestureOverlay {
         main.post { install(svc) }
         sessionJob?.cancel()
         sessionJob = scope.launch {
-            pro.potoki.bekon.agent.session.SessionService.state.collect { updateSessionActive(it.isRunning) }
+            pro.potoki.bekon.agent.session.SessionService.state.collect {
+                updateSessionActive(it.isRunning)
+                // Single source of truth: any session end path (Stop from notification/app/banner,
+                // onDestroy, tunnel failure, fresh process) drops every overlay we draw.
+                if (it.overlaysMustClear) clearAllSessionVisuals()
+            }
         }
         statusJob?.cancel()
         statusJob = scope.launch {
@@ -271,6 +284,14 @@ object GestureOverlay {
 
         fun clearCoach() {
             coach = null
+            invalidate()
+        }
+
+        fun clearAll() {
+            marks.clear()
+            coach = null
+            setStatus(null)
+            removeCallbacks(hideRunnable)
             invalidate()
         }
 

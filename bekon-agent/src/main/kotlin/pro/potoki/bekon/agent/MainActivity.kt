@@ -15,6 +15,8 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -92,10 +94,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // targetSdk 35+: edge-to-edge is enforced; draw behind bars and pad content to safeDrawing.
+        enableEdgeToEdge()
         setContent {
             MaterialTheme {
                 val state by SessionService.state.collectAsState()
-                BekonHome(state = state, onIntent = ::dispatchIntent)
+                Box(
+                    Modifier.fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                        .safeDrawingPadding(),
+                ) {
+                    BekonHome(state = state, onIntent = ::dispatchIntent)
+                }
             }
         }
     }

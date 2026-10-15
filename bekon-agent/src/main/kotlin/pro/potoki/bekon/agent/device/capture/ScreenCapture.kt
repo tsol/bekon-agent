@@ -86,6 +86,8 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
             Log.e(TAG, "getMediaProjection returned null")
             return
         }
+        // Android 14+: a consent Intent is single-use; never replay it (a new grant is needed each time).
+        if (android.os.Build.VERSION.SDK_INT >= 34) mediaProjectionData = null
         // Android 14+ requires a callback before createVirtualDisplay; harmless on 13/Itel.
         mp.registerCallback(projectionCallback, captureHandler)
         mediaProjection = mp

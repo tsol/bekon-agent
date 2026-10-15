@@ -6,6 +6,8 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -59,9 +61,11 @@ class DisclosureActivity : ComponentActivity() {
         val open = intent.getBooleanExtra(EXTRA_OPEN, true)
         val title = if (kind == Consent.Kind.A11Y) A11Y_TITLE else IME_TITLE
         val points = if (kind == Consent.Kind.A11Y) A11Y_POINTS else IME_POINTS
+        enableEdgeToEdge()
         setContent {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
+                  androidx.compose.foundation.layout.Box(Modifier.safeDrawingPadding()) {
                     Column(
                         Modifier.padding(24.dp).fillMaxSize().verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -83,6 +87,7 @@ class DisclosureActivity : ComponentActivity() {
                     }
                 }
             }
+                }
         }
     }
 

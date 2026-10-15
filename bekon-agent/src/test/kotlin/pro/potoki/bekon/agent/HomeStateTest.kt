@@ -28,4 +28,13 @@ class HomeStateTest {
     fun `default tunnel kind is cloudflare`() {
         assertEquals(TunnelKind.CLOUDFLARE, HomeState().tunnelKind)
     }
+
+    @Test
+    fun `overlays clear on every session end phase and stay while starting or serving`() {
+        assertTrue(HomeState().overlaysMustClear) // fresh process / after stop
+        assertTrue(HomeState(phase = SessionPhase.FAILED).overlaysMustClear) // tunnel death
+        assertTrue(HomeState(phase = SessionPhase.STOPPING).overlaysMustClear)
+        assertFalse(HomeState(phase = SessionPhase.SERVING).overlaysMustClear)
+        assertFalse(HomeState(phase = SessionPhase.STARTING).overlaysMustClear)
+    }
 }

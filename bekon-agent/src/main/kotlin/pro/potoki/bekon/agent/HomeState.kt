@@ -79,6 +79,8 @@ data class HomeState(
 ) {
     val canStart: Boolean get() = phase == SessionPhase.IDLE
     val isRunning: Boolean get() = phase == SessionPhase.SERVING
+    /** Session over (or never started / fresh process): overlays (bacon frame, coach, status pill) must be gone. */
+    val overlaysMustClear: Boolean get() = phase == SessionPhase.IDLE || phase == SessionPhase.FAILED || phase == SessionPhase.STOPPING
     val canShowQr: Boolean get() = !publicUrl.isNullOrBlank()
     val currentStep: SetupStep get() = SetupStep.entries.getOrElse(stepIndex) { SetupStep.DONE }
     val stepProgress: String get() = "${stepIndex.coerceIn(0, SetupStep.entries.size)}/${SetupStep.entries.size}"

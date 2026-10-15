@@ -62,6 +62,8 @@ class SessionService : Service() {
 
         const val ACTION_START = "pro.potoki.bekon.agent.action.START"
         const val ACTION_STOP = "pro.potoki.bekon.agent.action.STOP"
+        /** Notification swiped away (Android 14+ allows dismissing FGS notifications): re-post it. */
+        const val ACTION_REPOST = "pro.potoki.bekon.agent.action.REPOST_NOTIFICATION"
 
         @Volatile var instance: SessionService? = null
             private set
@@ -159,6 +161,10 @@ class SessionService : Service() {
         when (intent?.action) {
             ACTION_START -> startSession()
             ACTION_STOP -> stopSession()
+            ACTION_REPOST -> {
+                if (_state.value.isRunning || _state.value.phase == SessionPhase.STARTING) updateNotification(statusText())
+                else stopSelf(startId)
+            }
             else -> {
                 // Re-delivery after a system kill (START_STICKY): resume if we were serving.
                 if (_state.value.isRunning || _state.value.phase == SessionPhase.STARTING) {
@@ -406,6 +412,7 @@ class SessionService : Service() {
         try { server?.stop() } catch (e: Exception) { Log.w(TAG, "server stop ${e.message}") }
         pro.potoki.bekon.agent.device.capture.ScreenCapture.onSystemStop = null
         scope.cancel()
+        pro.potoki.bekon.agent.status.AgentStatus.clear()
         _state.value = HomeState()
         releaseWakeLock()
         if (instance === this) instance = null
@@ -454,6 +461,11 @@ class SessionService : Service() {
             Intent(this, SessionService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val deletePi = PendingIntent.getService(
+            this, 2,
+            Intent(this, SessionService::class.java).setAction(ACTION_REPOST),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         // agent_status: shown here when it is "done" or when the a11y overlay pill is unavailable.
         val st = pro.potoki.bekon.agent.status.AgentStatus.current.value
         val inNotif = st != null && (st.state == StatusState.DONE || !pro.potoki.bekon.agent.device.touch.GestureOverlay.canShowStatus())
@@ -474,6 +486,7 @@ class SessionService : Service() {
             .setContentText(body)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(pi)
+            .setDeleteIntent(deletePi)
             .setOngoing(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
