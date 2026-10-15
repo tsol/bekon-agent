@@ -38,7 +38,7 @@
       {"id": "xiaomi_battery", "req": "battery",
        "title": {"en": "Battery saver: No restrictions", "ru": "Контроль активности: Нет ограничений"},
        "path": {"en": "Settings > Apps > Bekon > Battery saver > No restrictions", "ru": "Настройки > Приложения > Bekon > Контроль активности > Нет ограничений"},
-       "intents": [{"component": "com.miui.powerkeeper/com.miui.powerkeeper.ui.HiddenAppsConfigActivity", "extras": {"package_name": "{pkg}", "package_label": "Bekon"}},
+       "intents": [{"component": "com.miui.powerkeeper/com.miui.powerkeeper.ui.HiddenAppsConfigActivity", "extras": {"package_name": "{pkg}", "package_label": "{label}"}},
                    {"action": "android.settings.APPLICATION_DETAILS_SETTINGS", "data": "package:{pkg}"}]},
       {"id": "xiaomi_popups", "req": "background_popup",
        "title": {"en": "Allow 'Display pop-up windows while running in background' and 'Show on lock screen'", "ru": "Разрешить «Отображать всплывающие окна при работе в фоне» и «На заблокированном экране»"},

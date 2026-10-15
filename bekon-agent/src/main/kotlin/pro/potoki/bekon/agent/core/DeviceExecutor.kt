@@ -55,7 +55,9 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
             val text = o.optString("text").trim().ifEmpty { null }
             val desc = o.optString("desc").trim().ifEmpty { null }
             val clickable = o.optBoolean("clickable", false)
-            nodes.add(RawNode(intArrayOf(l, t, r, bot), text, desc, clickable))
+            nodes.add(RawNode(intArrayOf(l, t, r, bot), text, desc, clickable,
+                o.optBoolean("checkable"), o.optBoolean("checked"), o.optBoolean("selected"),
+                o.optBoolean("enabled", true), o.optString("pkg").ifEmpty { null }, o.optBoolean("statusBar")))
         }
         val items = ArrayList<UiNode>()
         for (i in nodes.indices) {
@@ -68,6 +70,8 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
                     y = (rn.bounds[1] + rn.bounds[3]) / 2,
                     bounds = rn.bounds,
                     clickable = rn.clickable,
+                    checkable = rn.checkable, checked = rn.checked, selected = rn.selected,
+                    enabled = rn.enabled, pkg = rn.pkg, statusBar = rn.statusBar,
                 )
             )
         }
@@ -186,5 +190,13 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
         return dm.widthPixels to dm.heightPixels
     }
 
-    private data class RawNode(val bounds: IntArray, val text: String?, val desc: String?, val clickable: Boolean)
+    override fun changeSignal(): ChangeSignal = pro.potoki.bekon.agent.device.touch.ChangeMonitor
+
+    override fun foreground(): Map<String, String> = pro.potoki.bekon.agent.device.touch.ChangeMonitor.foreground()
+
+    private data class RawNode(
+        val bounds: IntArray, val text: String?, val desc: String?, val clickable: Boolean,
+        val checkable: Boolean = false, val checked: Boolean = false, val selected: Boolean = false,
+        val enabled: Boolean = true, val pkg: String? = null, val statusBar: Boolean = false,
+    )
 }

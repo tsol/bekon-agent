@@ -8,6 +8,13 @@ data class UiNode(
     val y: Int,
     val bounds: IntArray? = null, // [left, top, right, bottom]
     val clickable: Boolean = false,
+    val checkable: Boolean = false,
+    val checked: Boolean = false,
+    val selected: Boolean = false,
+    val enabled: Boolean = true,
+    val pkg: String? = null,
+    /** Status-bar clock/notification icons: shown, but never counted as a screen change. */
+    val statusBar: Boolean = false,
 )
 
 /**
@@ -88,4 +95,15 @@ interface ActionExecutor {
     /** Plain text on the system clipboard, or null when it is empty. */
     fun clipboard(): String?
     fun nav(action: String): Boolean
+    /** Live UI-change signal from accessibility events; null = poll tree hashes only. */
+    fun changeSignal(): ChangeSignal? = null
+    /** Foreground package/activity/window title, best effort. */
+    fun foreground(): Map<String, String> = emptyMap()
+}
+
+/** Counter of meaningful accessibility events (own overlay and status-bar ticks excluded). */
+interface ChangeSignal {
+    val seq: Long
+    val lastEventAt: Long
+    val lastReason: String
 }

@@ -137,6 +137,8 @@ class DeviceSetupGuide(
             return "opened Bekon's accessibility disclosure; the user must tap Accept before the Accessibility settings open"
         }
         val pkg = ctx.packageName
+        // Our own label ("Bekon Agent"), never a hardcoded "Bekon": other pro.* Bekon apps may be installed.
+        val label = try { ctx.packageManager.getApplicationLabel(ctx.applicationInfo).toString() } catch (_: Exception) { "Bekon Agent" }
         val tried = mutableListOf<String>()
         for (e in st["intents"]?.jsonArray ?: JsonArray(emptyList())) {
             val o = e.jsonObject
@@ -147,12 +149,16 @@ class DeviceSetupGuide(
                 o.s("component").ifEmpty { null }?.let { component = ComponentName.unflattenFromString(it) }
                 o.s("data").ifEmpty { null }?.let { data = Uri.parse(it.replace("{pkg}", pkg)) }
                 o.s("extraPkg").ifEmpty { null }?.let { putExtra(it, pkg) }
-                (o["extras"] as? JsonObject)?.forEach { (k, v) -> putExtra(k, (v as JsonPrimitive).content.replace("{pkg}", pkg)) }
+                (o["extras"] as? JsonObject)?.forEach { (k, v) -> putExtra(k, (v as JsonPrimitive).content.replace("{pkg}", pkg).replace("{label}", label)) }
             }
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            val label = o.s("component").ifEmpty { o.s("action").ifEmpty { "launcher" } }
-            try { ctx.startActivity(i); return "opened $label (after ${tried.size} fallback(s))" }
-            catch (ex: Exception) { tried += "$label: ${ex.javaClass.simpleName}" }
+            val what = o.s("component").ifEmpty { o.s("action").ifEmpty { "launcher" } }
+            try {
+                ctx.startActivity(i)
+                val ex = i.extras?.keySet()?.joinToString { k -> "$k=${i.extras?.get(k)}" }
+                return "opened $what${if (ex.isNullOrEmpty()) "" else " [$ex]"} for $pkg (after ${tried.size} fallback(s))"
+            }
+            catch (ex: Exception) { tried += "$what: ${ex.javaClass.simpleName}" }
         }
         throw IllegalStateException("no screen opened for $stepId. tried: ${tried.joinToString("; ")}. Guide the user manually: ${st["path"]}")
     }

@@ -39,6 +39,16 @@ class McpHandler(
     private val setup: pro.potoki.bekon.agent.setup.DeviceSetupGuide? = null,
 ) {
     companion object {
+        /** Default stays well below Cloudflare's ~100s proxy read timeout (HTTP 524). */
+        const val WAIT_DEFAULT_MS = 30_000
+        const val WAIT_MAX_MS = 90_000
+        const val POLL_MS = 1_000L
+        const val COACH_INSTRUCTIONS =
+            "Coaching a human (e.g. device setup): you decide what to coach; Bekon only waits. " +
+                "Loop: snapshot (keep its baseline token) -> coach_draw a hint on the exact control -> " +
+                "wait_for_change with that baseline -> read the diff (added/removed/changed, toggles 'off -> on') -> next hint or coach_clear when done. " +
+                "Never ask the human to type or say 'done'. Never stop to wait for chat replies during setup; " +
+                "if wait_for_change times out (changed=false), re-check the screen and call it again."
         const val READ_ONLY = "device is in read-only mode so this action was declined."
         val WRITE_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
@@ -48,6 +58,16 @@ class McpHandler(
 
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** Recent snapshots by baseline token, so wait_for_change can diff against what the agent saw. */
+    private val baselines = object : LinkedHashMap<String, List<pro.potoki.bekon.agent.core.UiNode>>(16, 0.75f, true) {
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, List<pro.potoki.bekon.agent.core.UiNode>>?) = size > 16
+    }
+    private fun remember(items: List<pro.potoki.bekon.agent.core.UiNode>): String {
+        val t = pro.potoki.bekon.agent.core.ScreenDiff.token(items)
+        synchronized(baselines) { baselines[t] = items }
+        return t
+    }
 
     @Serializable
     data class JsonRpcRequest(val id: Int = 0, val method: String, val params: JsonElement? = null)
@@ -74,7 +94,7 @@ class McpHandler(
                 put("protocolVersion", "2025-03-26")
                 put("capabilities", buildJsonObject { put("tools", JsonObject(emptyMap())) })
                 put("serverInfo", buildJsonObject { put("name", "bekon-agent"); put("version", "0.1") })
-                put("instructions", ClientGate.INSTRUCTIONS)
+                put("instructions", ClientGate.INSTRUCTIONS + " " + COACH_INSTRUCTIONS)
             }))
             "notifications/initialized" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
             "ping" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
@@ -88,11 +108,17 @@ class McpHandler(
                     return
                 }
                 try {
-                    val data = callTool(name, args)
+                    val raw = callTool(name, args)
+                    val shot = (raw["screenshot"] as? JsonObject)
+                    val data = if (shot != null) JsonObject(raw.filterKeys { it != "screenshot" }) else raw
                     val content: JsonObject = when {
                         name == "screenshot" || name == "annotate_screenshot" -> data
                         // MCP content items must carry a type; ship the tree as JSON text.
                         name == "snapshot" -> buildJsonObject { put("type", "text"); put("text", data.toString()) }
+                        name == "wait_for_change" -> buildJsonObject {
+                            put("type", "text")
+                            put("text", ((data["summary"] as? JsonPrimitive)?.content ?: "") + "\n" + data.toString())
+                        }
                         else -> {
                             val clip = (data["text"] as? JsonPrimitive)?.content
                             buildJsonObject { put("type", "text"); put("text", clip ?: "ok") }
@@ -111,6 +137,11 @@ class McpHandler(
                                 })
                             } else {
                                 add(content)
+                                if (shot != null) add(buildJsonObject {
+                                    put("type", "image")
+                                    put("mimeType", (shot["mime"] as? JsonPrimitive)?.content ?: "image/jpeg")
+                                    put("data", (shot["data"] as? JsonPrimitive)?.content ?: "")
+                                })
                             }
                         })
                         // Don't ship the image twice (content + structuredContent) over the tunnel.
@@ -140,24 +171,123 @@ class McpHandler(
     }
 
     /** Each tool returns a JsonObject payload (for structuredContent) OR a screenshot object. */
-    private fun callTool(name: String, args: JsonObject): JsonObject = when (name) {
-        "snapshot" -> {
-            val s = executor.snapshot()
-            buildJsonObject {
-                put("screenW", s.screenW); put("screenH", s.screenH)
-                put("imageW", s.imageW); put("imageH", s.imageH)
-                put("items", buildJsonArray {
-                    for (n in s.items) {
-                        add(buildJsonObject {
-                            put("ref", n.ref); put("name", n.label)
-                            put("x", n.x); put("y", n.y)
-                            put("clickable", n.clickable)
-                            put("bounds", buildJsonArray { n.bounds?.forEach { add(JsonPrimitive(it)) } ?: Unit })
-                        })
+    private fun itemJson(n: pro.potoki.bekon.agent.core.UiNode) = buildJsonObject {
+        put("ref", n.ref); put("name", n.label)
+        put("x", n.x); put("y", n.y)
+        put("clickable", n.clickable)
+        put("checkable", n.checkable); put("checked", n.checked)
+        put("selected", n.selected); put("enabled", n.enabled)
+        if (n.statusBar) put("statusBar", true)
+        put("bounds", buildJsonArray { n.bounds?.forEach { add(JsonPrimitive(it)) } ?: Unit })
+    }
+
+    private fun snapshotJson(s: pro.potoki.bekon.agent.core.ScreenSnapshot, token: String) = buildJsonObject {
+        put("screenW", s.screenW); put("screenH", s.screenH)
+        put("imageW", s.imageW); put("imageH", s.imageH)
+        put("baseline", token)
+        put("items", buildJsonArray { for (n in s.items) add(itemJson(n)) })
+    }
+
+    private fun foregroundJson() = buildJsonObject { executor.foreground().forEach { (k, v) -> put(k, v) } }
+
+    /**
+     * Block until the screen meaningfully changes vs [baseline] (or the screen at call time),
+     * then wait for the UI to be quiet for debounceMs (capped by settleMaxMs).
+     */
+    private suspend fun waitForChange(args: JsonObject): JsonObject {
+        val timeout = (args.intOr("timeoutMs") ?: WAIT_DEFAULT_MS).coerceIn(0, WAIT_MAX_MS).toLong()
+        val debounce = (args.intOr("debounceMs") ?: 600).coerceIn(0, 5000).toLong()
+        val settleMax = (args.intOr("settleMaxMs") ?: 3000).coerceIn(debounce.toInt(), 10000).toLong()
+        val withShot = args.boolOr("includeScreenshot") ?: false
+        val sig = executor.changeSignal()
+        val t0 = System.nanoTime()
+        fun elapsed() = (System.nanoTime() - t0) / 1_000_000
+        val given = args.strOr("baseline")
+        var baseItems: List<pro.potoki.bekon.agent.core.UiNode>? = given?.let { synchronized(baselines) { baselines[it] } }
+        val baseToken: String = given ?: remember(executor.snapshot().items.also { baseItems = it })
+        var seq = sig?.seq ?: 0L
+        var lastPoll = 0L
+        var reason = ""
+        var result: pro.potoki.bekon.agent.core.ScreenSnapshot? = null
+        var cur: pro.potoki.bekon.agent.core.ScreenSnapshot? = null
+        var first = true
+        while (true) {
+            val now = elapsed()
+            val evt = sig != null && sig.seq != seq
+            val poll = first || now - lastPoll >= POLL_MS
+            if (evt || poll) {
+                first = false
+                if (evt) { seq = sig!!.seq; reason = sig.lastReason }
+                // Debounce: quiet for [debounce] ms after the latest event, but no longer than settleMax.
+                val settleStart = elapsed()
+                if (evt && sig != null) {
+                    var lastSeen = sig.seq; var quietSince = elapsed()
+                    while (elapsed() - quietSince < debounce && elapsed() - settleStart < settleMax && elapsed() < timeout) {
+                        kotlinx.coroutines.delay(50)
+                        if (sig.seq != lastSeen) { lastSeen = sig.seq; quietSince = elapsed(); reason = sig.lastReason }
                     }
-                })
+                    seq = sig.seq
+                }
+                lastPoll = elapsed()
+                val snap = try { executor.snapshot() } catch (e: CapabilityException) { if (elapsed() >= timeout) throw e else null }
+                if (snap != null) {
+                    cur = snap
+                    if (pro.potoki.bekon.agent.core.ScreenDiff.token(snap.items) != baseToken) {
+                        if (!evt) {
+                            reason = if (reason.isEmpty()) "tree hash changed (poll)" else reason
+                            // Change found by polling: still let it settle once.
+                            kotlinx.coroutines.delay(debounce)
+                            result = try { executor.snapshot() } catch (_: CapabilityException) { snap }
+                        } else result = snap
+                        break
+                    }
+                }
+            }
+            if (elapsed() >= timeout) break
+            kotlinx.coroutines.delay(50)
+        }
+        val fin = result ?: cur ?: executor.snapshot()
+        val token = remember(fin.items)
+        val changed = result != null && token != baseToken
+        val diff = baseItems?.let { pro.potoki.bekon.agent.core.ScreenDiff.diff(it, fin.items) }
+        val fg = foregroundJson()
+        return buildJsonObject {
+            put("changed", changed)
+            put("reason", if (changed) reason.ifEmpty { "tree changed" } else "timeout: no meaningful change in ${timeout}ms; call wait_for_change again with the same baseline")
+            put("elapsedMs", elapsed())
+            put("window", fg)
+            put("baseline", token)
+            put("previousBaseline", baseToken)
+            if (diff != null) put("diff", buildJsonObject {
+                put("added", buildJsonArray { diff.added.take(40).forEach { add(buildJsonObject { put("ref", it.ref); put("name", it.label); put("state", pro.potoki.bekon.agent.core.ScreenDiff.state(it).trim()) }) } })
+                put("removed", buildJsonArray { diff.removed.take(40).forEach { add(buildJsonObject { put("name", it.label); put("state", pro.potoki.bekon.agent.core.ScreenDiff.state(it).trim()) }) } })
+                put("changed", buildJsonArray { diff.changed.take(40).forEach { add(buildJsonObject { put("ref", it.ref); put("name", it.name); put("what", it.what) }) } })
+            }) else put("diff", JsonPrimitive("unavailable: baseline token not known to this server (take a snapshot first)"))
+            put("summary", buildString {
+                append(if (changed) "CHANGED" else "NO CHANGE (timeout)")
+                fg["package"]?.let { append(" — ${(it as JsonPrimitive).content}") }
+                fg["title"]?.let { append(" '${(it as JsonPrimitive).content}'") }
+                append(" after ${elapsed()}ms")
+                if (diff != null) append("\n" + diff.summary())
+            })
+            put("screenW", fin.screenW); put("screenH", fin.screenH)
+            put("items", buildJsonArray { for (n in fin.items) add(itemJson(n)) })
+            if (withShot) {
+                try {
+                    val f = executor.screenshot(ScreenshotDefaults.SCALE, ScreenshotDefaults.QUALITY, "jpeg")
+                    put("screenshot", buildJsonObject { put("mime", f.mime); put("data", Base64.getEncoder().encodeToString(f.bytes)) })
+                } catch (e: Exception) { put("screenshotError", e.message ?: "capture failed") }
             }
         }
+    }
+
+    private suspend fun callTool(name: String, args: JsonObject): JsonObject = when (name) {
+        "snapshot" -> {
+            val s = executor.snapshot()
+            val t = remember(s.items)
+            JsonObject(snapshotJson(s, t) + ("window" to foregroundJson()))
+        }
+        "wait_for_change" -> waitForChange(args)
         "screenshot" -> {
             val scale = args.floatOr("scale") ?: ScreenshotDefaults.SCALE
             val quality = args.intOr("quality") ?: ScreenshotDefaults.QUALITY
@@ -195,7 +325,7 @@ class McpHandler(
             if (!c.drawOnScreen(shapes, append, ttl)) {
                 throw CapabilityException("overlay: accessibility service (Gestures) is off. Use annotate_screenshot and show the image to the user instead.")
             }
-            buildJsonObject { put("ok", true); put("text", "drew ${shapes.size} mark(s) on the phone screen") }
+            buildJsonObject { put("ok", true); put("text", "drew ${shapes.size} mark(s) on the phone screen. Now call wait_for_change (pass your last baseline) and read its diff; do not ask the human to say 'done'.") }
         }
         "coach_clear" -> {
             val c = coach ?: throw CapabilityException("coach: not available")
@@ -251,7 +381,7 @@ class McpHandler(
         "device_setup_guide" -> (setup ?: throw CapabilityException("setup guide: not available")).guide()
         "open_setup_screen" -> {
             val g = setup ?: throw CapabilityException("setup guide: not available")
-            buildJsonObject { put("ok", true); put("text", g.open(args.str("step"))) }
+            buildJsonObject { put("ok", true); put("text", g.open(args.str("step")) + ". Next: snapshot, coach_draw a hint on the control to change, then wait_for_change and read the diff. Never wait for a chat reply during setup.") }
         }
         "shortcut_add" -> {
             val saved = shortcutStore().add(args.str("title"), args.str("kind"), args.str("target"))
@@ -278,7 +408,18 @@ class McpHandler(
     }
 
     private val toolsList: JsonElement = buildJsonArray {
-        tool("snapshot", "Accessibility-tree snapshot of the screen (nodes in screen space)", schema())
+        tool("snapshot", "Accessibility-tree snapshot of the screen (nodes in screen space). Items carry checkable/checked/selected/enabled (switches, radio rows, checkmarks). Returns a baseline token for wait_for_change.", schema())
+        tool(
+            "wait_for_change",
+            "Block until the phone screen meaningfully changes (new window, tap result, toggle flipped, text changed), wait until the UI is quiet for debounceMs, then return. Ignores Bekon's own overlay and status-bar clock/icons. Returns changed, reason, elapsedMs, window {package, activity, title}, diff vs baseline (added/removed/changed incl. 'on -> off'), full new items and a new baseline token. On timeout changed=false with the current snapshot: just call again. Coaching loop: coach_draw hint -> wait_for_change -> read diff -> next hint. Never ask the human to say 'done'.",
+            schema {
+                int("timeoutMs", required = false)
+                int("debounceMs", required = false)
+                int("settleMaxMs", required = false)
+                str("baseline", required = false)
+                add("includeScreenshot", buildJsonObject { put("type", "boolean") }, false)
+            },
+        )
         tool(
             "screenshot",
             "Capture the screen. scale is a fraction of the real screen (default 0.25, four times smaller). format is jpeg or png. quality is 1-100 and applies to jpeg only. Node coordinates stay in screen space; use width/height to place this image.",

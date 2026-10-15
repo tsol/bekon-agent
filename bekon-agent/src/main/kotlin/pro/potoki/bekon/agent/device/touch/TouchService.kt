@@ -61,6 +61,7 @@ class TouchService : AccessibilityService() {
 
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
         if (!consented) return
+        if (e != null) ChangeMonitor.onEvent(e, packageName)
         if (e?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = e.packageName?.toString() ?: return
         // Ignore our own overlays/dialogs and transient system UI (shade, toasts).
