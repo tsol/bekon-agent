@@ -49,7 +49,7 @@ class ShortcutStore(context: Context) {
         val cleanTitle = title.trim()
         val cleanKind = kind.trim()
         if (cleanTitle.isEmpty()) throw IllegalArgumentException("title is empty")
-        if (cleanKind != "app" && cleanKind != "url") throw IllegalArgumentException("kind must be app or url")
+        if (cleanKind !in KINDS) throw IllegalArgumentException("kind must be app, url or script")
         val cleanTarget = normalizeTarget(cleanKind, target)
         if (cleanKind == "app" && app.packageManager.getLaunchIntentForPackage(cleanTarget) == null) {
             throw IllegalArgumentException("no launchable app for $cleanTarget")
@@ -71,14 +71,26 @@ class ShortcutStore(context: Context) {
         return true
     }
 
-    fun open(id: String) {
+    /** Opens app/url; for a script only launches its optional "app" first. Returns the row (caller runs script rules). */
+    fun open(id: String): Shortcut {
         val item = list().find { it.id == id } ?: throw IllegalArgumentException("no shortcut $id")
+        if (item.kind == "script") {
+            val pkg = JSONObject(item.target).optString("app").ifBlank { null } ?: return item
+            launch(app.packageManager.getLaunchIntentForPackage(pkg) ?: throw IllegalArgumentException("no launchable app $pkg"))
+            return item
+        }
         val intent = when (item.kind) {
             "app" -> app.packageManager.getLaunchIntentForPackage(item.target)
                 ?: throw IllegalArgumentException("no launchable app ${item.target}")
             "url" -> Intent(Intent.ACTION_VIEW, Uri.parse(item.target))
             else -> throw IllegalArgumentException("unknown kind ${item.kind}")
-        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        launch(intent)
+        return item
+    }
+
+    private fun launch(i: Intent) {
+        val intent = i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val done = CompletableFuture<Unit>()
         Handler(Looper.getMainLooper()).post {
             try {
@@ -98,6 +110,13 @@ class ShortcutStore(context: Context) {
     private fun normalizeTarget(kind: String, target: String): String {
         val value = target.trim()
         if (value.isEmpty()) throw IllegalArgumentException("target is empty")
+        if (kind == "script") {
+            // {"app"?: package launched first, "rules": [shared coach/nav rule format], "timeoutMs"?}
+            val o = try { JSONObject(value) } catch (e: Exception) { throw IllegalArgumentException("script target must be JSON {app?, rules, timeoutMs?}") }
+            val rules = o.optJSONArray("rules") ?: throw IllegalArgumentException("script target needs rules")
+            pro.potoki.bekon.agent.coach.CoachScript.parse(kotlinx.serialization.json.Json.parseToJsonElement(rules.toString()) as kotlinx.serialization.json.JsonArray)
+            return o.toString()
+        }
         if (kind != "url") return value
         val withScheme = if ("://" in value) value else "https://$value"
         val uri = Uri.parse(withScheme)
@@ -133,5 +152,6 @@ class ShortcutStore(context: Context) {
     companion object {
         private const val PREFS = "bekon_shortcuts"
         private const val KEY = "items"
+        val KINDS = setOf("app", "url", "script")
     }
 }

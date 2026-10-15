@@ -48,16 +48,39 @@ class McpHandler(
                 "Loop: snapshot (keep its baseline token) -> coach_draw a hint on the exact control -> " +
                 "wait_for_change with that baseline -> read the diff (added/removed/changed, toggles 'off -> on') -> next hint or coach_clear when done. " +
                 "Never ask the human to type or say 'done'. Never stop to wait for chat replies during setup; " +
-                "if wait_for_change times out (changed=false), re-check the screen and call it again."
+                "if wait_for_change times out (changed=false), re-check the screen and call it again. " +
+                "Prefer coach_script for multi-step or scrolling targets: upload rules (done when the toggle is on; circle the row when its text is visible; " +
+                "arrow_down 'Прокрутите ниже' when it is not) and call wait_for_script; the phone moves the highlight itself. " +
+                "Before Accessibility (Gestures) is on you cannot tap, scroll, snapshot or draw on the phone: only screenshot/annotate_screenshot work, " +
+                "so coach the human in chat with annotated screenshots to scroll and tap themselves (never use tap/swipe for the human). Marks are cleared automatically when wait_for_change sees a change."
         const val READ_ONLY = "device is in read-only mode so this action was declined."
         val WRITE_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
-            "coach_draw", "coach_clear", "open_setup_screen",
+            "coach_draw", "coach_clear", "open_setup_screen", "coach_script", "coach_script_stop",
         )
     }
 
 
     private val json = Json { ignoreUnknownKeys = true }
+    private val scripts by lazy { CoachScriptRunner(executor, coach) }
+
+    private fun scriptJson(r: CoachScriptRunner.Run) = buildJsonObject {
+        put("status", r.status)
+        put("elapsedMs", r.elapsed())
+        r.current?.let { put("currentRule", it) }
+        r.doneRule?.let { put("doneRule", it) }
+        r.error?.let { put("error", it) }
+        val ev = synchronized(r.events) { r.events.toList() }
+        put("fired", buildJsonArray { ev.takeLast(30).forEach { e -> add(buildJsonObject { put("rule", e.ruleId); put("atMs", e.atMs); e.pkg?.let { put("package", it) } }) } })
+        put("text", buildString {
+            append("script ${r.status} after ${r.elapsed()}ms")
+            r.doneRule?.let { append("; done by rule '$it'") }
+            r.current?.let { if (r.status == "running") append("; showing rule '$it'") }
+            r.error?.let { append("; error: $it") }
+            if (ev.isNotEmpty()) append("; fired: " + ev.takeLast(12).joinToString(" -> ") { "${it.ruleId}@${it.atMs}ms" })
+            if (r.status == "error") append(". Accessibility (Gestures) is needed for node rules and the overlay; without it use screenshot + annotate_screenshot and ask the human in chat.")
+        })
+    }
 
     /** Recent snapshots by baseline token, so wait_for_change can diff against what the agent saw. */
     private val baselines = object : LinkedHashMap<String, List<pro.potoki.bekon.agent.core.UiNode>>(16, 0.75f, true) {
@@ -331,8 +354,32 @@ class McpHandler(
             }
             buildJsonObject { put("ok", true); put("text", "drew ${shapes.size} mark(s) on the phone screen. Now call wait_for_change (pass your last baseline) and read its diff; do not ask the human to say 'done'.") }
         }
+        "coach_script" -> {
+            val rules = pro.potoki.bekon.agent.coach.CoachScript.parse(args["rules"] as? kotlinx.serialization.json.JsonArray)
+            if (coach == null) throw CapabilityException("coach: not available")
+            // Fail fast (before starting a thread) when the a11y tree is unavailable.
+            executor.snapshot()
+            val timeout = (args.intOr("timeoutMs") ?: 120_000).coerceIn(1_000, 600_000).toLong()
+            val interval = (args.intOr("intervalMs") ?: 250).coerceIn(100, 2_000).toLong()
+            val r = scripts.start(rules, timeout, interval)
+            Thread.sleep(minOf(interval + 150, 600))
+            val o = scriptJson(r)
+            JsonObject(o + ("text" to JsonPrimitive((o["text"] as JsonPrimitive).content + ". The phone now follows these rules itself; call wait_for_script to block until a done rule fires.")))
+        }
+        "wait_for_script" -> {
+            val r = scripts.run ?: throw IllegalArgumentException("no coach_script started")
+            val t = (args.intOr("timeoutMs") ?: WAIT_DEFAULT_MS).coerceIn(0, WAIT_MAX_MS).toLong()
+            val onChange = args.boolOr("returnOnRuleChange") == true
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { scripts.await(r, t, onChange) }
+            scriptJson(r)
+        }
+        "coach_script_stop" -> {
+            scripts.stop()
+            buildJsonObject { put("ok", true); put("text", "script stopped, marks cleared") }
+        }
         "coach_clear" -> {
             val c = coach ?: throw CapabilityException("coach: not available")
+            scripts.run?.takeIf { it.status == "running" }?.let { scripts.stop() }
             c.clearScreen()
             buildJsonObject { put("ok", true); put("text", "cleared") }
         }
@@ -399,8 +446,16 @@ class McpHandler(
         }
         "shortcut_open" -> {
             val id = args.str("id")
-            shortcutStore().open(id)
-            buildJsonObject { put("ok", true); put("text", "opened $id") }
+            val item = shortcutStore().open(id)
+            if (item.kind != "script") buildJsonObject { put("ok", true); put("text", "opened $id") } else {
+                val o = org.json.JSONObject(item.target)
+                val rules = pro.potoki.bekon.agent.coach.CoachScript.parse(json.parseToJsonElement(o.getJSONArray("rules").toString()) as kotlinx.serialization.json.JsonArray)
+                if (o.optString("app").isNotBlank()) kotlinx.coroutines.delay(1200)
+                val r = scripts.start(rules, o.optLong("timeoutMs", 60_000).coerceIn(1_000, 600_000), 250)
+                val wait = (args.intOr("waitMs") ?: 20_000).coerceIn(0, WAIT_MAX_MS).toLong()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { scripts.await(r, wait, false) }
+                JsonObject(scriptJson(r) + ("shortcut" to JsonPrimitive(item.title)))
+            }
         }
         "shortcut_remove" -> {
             val id = args.str("id")
@@ -469,7 +524,31 @@ class McpHandler(
             },
         )
         tool("connection_info", "Bekon handoff: what this server is, its MCP endpoint and core tools.", schema())
-        tool("coach_clear", "Remove all coach marks from the phone screen.", schema())
+        tool("coach_clear", "Remove all coach marks from the phone screen (also stops a running coach_script).", schema())
+        tool(
+            "coach_script",
+            "Upload a mini highlight script the PHONE runs itself (~4x/s) so hints follow scrolling/re-sorting instantly with no agent round-trip. " +
+                "rules: ordered list; each tick the FIRST matching rule fires. A rule may also carry do:{type: tap|scroll_down|scroll_up|back|home, target:{text|contains}, settleMs} (nav action, runs on the phone; same format as script shortcuts). Rule: {id, when:{textVisible|contains, textNotVisible|notContains, package, " +
+                "checked:{text|contains, value}, selected:{text|contains, value}} (all ANDed; empty when = always), draw:{type: circle|box|underline (around the node; " +
+                "target:{text|contains} or the when node; checkable control preferred for checked rules) | arrow_down|arrow_up (scroll hint, centre) | text, label, color}, done:true ends it}. " +
+                "Put the done rule first, then the 'target visible' rule, then a fallback scroll-hint rule. Matching is by visible text/contentDescription (no resource ids). " +
+                "Needs Accessibility (Gestures) on: without it there is no node tree and no overlay; use screenshot + annotate_screenshot instead. Starting a script replaces the previous one.",
+            schema {
+                add("rules", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "object") }) }, true)
+                int("timeoutMs", required = false)
+                int("intervalMs", required = false)
+            },
+        )
+        tool(
+            "wait_for_script",
+            "Block until the running coach_script ends (done rule fired, timeout, stopped, error) or timeoutMs passes (default 30s, max 90s; just call again while status=running). " +
+                "returnOnRuleChange=true also returns when a different rule starts showing. Returns status, doneRule, currentRule and the fired rule history with times.",
+            schema {
+                int("timeoutMs", required = false)
+                add("returnOnRuleChange", buildJsonObject { put("type", "boolean") }, false)
+            },
+        )
+        tool("coach_script_stop", "Stop the running coach_script and clear its marks.", schema())
         tool(
             "device_setup_guide",
             "Phone manufacturer/model/SDK/ROM and the ordered OEM-specific setup steps Bekon needs (restricted settings, accessibility, notifications, autostart, battery, background popups, screen capture 'Entire screen'), each with EN/RU text, settings path and live status ok/todo/unknown. Use before coaching a user through setup.",
@@ -503,14 +582,16 @@ class McpHandler(
         )
         tool(
             "shortcut_add",
-            "Save a shortcut. kind is app (target is the Android package name) or url (target is an http or https link). The same target is not saved twice.",
+            "Save a shortcut. kind is app (target is the Android package name), url (an http or https link) or script: target is JSON " +
+                "{\"app\"?: package to launch first, \"rules\": [same rule format as coach_script, plus do:{type: tap|scroll_down|scroll_up|back|home, target:{text|contains}, settleMs}], \"timeoutMs\"?}. " +
+                "A script replays on the phone with one shortcut_open (e.g. open Settings > scroll to 'Bekon Agent' > tap). Actions need Accessibility. The same target is not saved twice.",
             schema {
                 str("title")
-                str("kind", enum = listOf("app", "url"))
+                str("kind", enum = listOf("app", "url", "script"))
                 str("target")
             },
         )
-        tool("shortcut_open", "Open a saved shortcut by id. An app launches on the phone. A url opens in the browser.", schema { str("id") })
+        tool("shortcut_open", "Open a saved shortcut by id. An app launches on the phone. A url opens in the browser. A script runs its rules on the phone and waits up to waitMs (default 20s) for done; then use wait_for_script if still running.", schema { str("id"); int("waitMs", required = false) })
         tool("shortcut_remove", "Delete a saved shortcut by id.", schema { str("id") })
     }
 
