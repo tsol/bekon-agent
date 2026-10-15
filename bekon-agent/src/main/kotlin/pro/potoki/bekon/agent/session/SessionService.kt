@@ -360,7 +360,7 @@ class SessionService : Service() {
     /** Re-derive stepIndex from real capability flags (called after onResume from settings). */
     fun reconcileSteps() {
         val engine = stepEngine ?: return
-        val missing = engine.reconcile(_state.value.stepIndex)
+        val missing = engine.reconcile(0) // from the top: earlier steps can re-block, finished ones must clear
         _state.value = _state.value.copy(stepIndex = engine.stepIndex)
         if (missing != null) emitHint()
         updateNotification(statusText())

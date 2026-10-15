@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -277,6 +278,10 @@ fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
         }
     }
 
+    // System Back closes the in-app overlays instead of leaving the app.
+    androidx.activity.compose.BackHandler(enabled = showQr || showShortcuts) {
+        if (showShortcuts) showShortcuts = false else showQr = false
+    }
     if (showQr && state.canShowQr) {
         QrScreen(state.publicUrl!!, onDismiss = { showQr = false }, onShortcuts = { showShortcuts = true })
     }
@@ -389,14 +394,19 @@ private fun QrScreen(url: String, onDismiss: () -> Unit, onShortcuts: () -> Unit
             Spacer(Modifier.height(20.dp))
             val prefs = remember { PrefsTrustedClients(context) }
             var autoAccept by remember { mutableStateOf(prefs.autoAcceptNext()) }
-            if (!BuildConfig.PLAY_STORE) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Checkbox(
-                    checked = autoAccept,
-                    onCheckedChange = {
+            // Whole row toggles, so the checkbox carries its label for taps and accessibility.
+            if (!BuildConfig.PLAY_STORE) Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().toggleable(
+                    value = autoAccept,
+                    role = androidx.compose.ui.semantics.Role.Checkbox,
+                    onValueChange = {
                         autoAccept = it
                         prefs.setAutoAcceptNext(it)
                     },
-                )
+                ),
+            ) {
+                Checkbox(checked = autoAccept, onCheckedChange = null)
                 Text(
                     "Auto accept and remember next connection",
                     style = MaterialTheme.typography.bodyMedium,
@@ -436,13 +446,7 @@ private fun HomeFooter(state: HomeState, onIntent: (HomeIntent) -> Unit) {
                 enabled = state.isRunning,
                 onClick = { onIntent(HomeIntent.SetReadOnly(!state.readOnly)) },
             )
-            FooterButton(
-                label = "Settings",
-                icon = R.drawable.ic_settings,
-                selected = false,
-                enabled = true,
-                onClick = { /* later: the rest of the menu lives here */ },
-            )
+            SettingsMenuButton()
         }
     }
 }
@@ -512,6 +516,8 @@ private fun SetupCard(state: HomeState, onIntent: (HomeIntent) -> Unit) {
     }
     val step = state.currentStep
     if (step == SetupStep.DONE || step == SetupStep.COACH || step == SetupStep.STARTING) return
+    // Idle: no service has checked anything yet, so the step would be a stale default. Start asks for what is missing.
+    if (state.phase == SessionPhase.IDLE) return
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(state.stepProgress, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
@@ -530,7 +536,12 @@ private fun SetupCard(state: HomeState, onIntent: (HomeIntent) -> Unit) {
                         } else if (action == "media_projection") {
                             Intent(context, CapturePermissionActivity::class.java)
                         } else {
-                            Intent(action)
+                            Intent(action).apply {
+                                // APP_NOTIFICATION_SETTINGS closes immediately without the package.
+                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                putExtra("app_package", context.packageName)
+                                putExtra("app_uid", context.applicationInfo.uid)
+                            }
                         }
                         context.startActivity(i)
                     } catch (e: Exception) {
@@ -553,4 +564,47 @@ private fun settingsActionFor(step: SetupStep): String = when (step) {
     SetupStep.GESTURES -> Settings.ACTION_ACCESSIBILITY_SETTINGS
     SetupStep.KEYBOARD -> Settings.ACTION_INPUT_METHOD_SETTINGS
     else -> Settings.ACTION_SETTINGS
+}
+
+
+/** Footer "Settings": a small menu with the policy, disclosures, Android app info and the version. */
+@Composable
+private fun SettingsMenuButton() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    Box {
+        FooterButton(
+            label = "Settings",
+            icon = R.drawable.ic_settings,
+            selected = open,
+            enabled = true,
+            onClick = { open = true },
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Privacy policy") }, onClick = { open = false; Consent.openPrivacyPolicy(ctx) })
+            DropdownMenuItem(
+                text = { Text("Accessibility disclosure") },
+                onClick = { open = false; Consent.showDisclosure(ctx, Consent.Kind.A11Y, thenOpenSettings = false) },
+            )
+            if (Consent.imeAvailable()) DropdownMenuItem(
+                text = { Text("Keyboard disclosure") },
+                onClick = { open = false; Consent.showDisclosure(ctx, Consent.Kind.IME, thenOpenSettings = false) },
+            )
+            DropdownMenuItem(
+                text = { Text("App info (Android settings)") },
+                onClick = {
+                    open = false
+                    Consent.start(
+                        ctx,
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${ctx.packageName}")),
+                    )
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Version ${BuildConfig.VERSION_NAME} (${if (BuildConfig.PLAY_STORE) "Play" else "full"})") },
+                onClick = { open = false },
+                enabled = false,
+            )
+        }
+    }
 }

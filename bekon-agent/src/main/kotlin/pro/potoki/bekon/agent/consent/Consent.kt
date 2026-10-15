@@ -3,7 +3,6 @@ package pro.potoki.bekon.agent.consent
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
 import pro.potoki.bekon.agent.BuildConfig
 
@@ -13,8 +12,8 @@ import pro.potoki.bekon.agent.BuildConfig
  * Decline leaves the capability off and the disclosure can be shown again any time.
  */
 object Consent {
-    // TODO(play): replace with the real hosted privacy policy before submitting to Play.
-    const val PRIVACY_POLICY_URL = "https://bekon.potoki.pro/privacy"
+    /** Public (Play Console) URL; see [PrivacyPolicy]. The in-app button uses the bundled copy. */
+    const val PRIVACY_POLICY_URL = PrivacyPolicy.PUBLIC_URL
 
     enum class Kind { A11Y, IME }
 
@@ -49,7 +48,8 @@ object Consent {
         start(ctx, Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
     }
 
-    fun openPrivacyPolicy(ctx: Context) = start(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL)))
+    /** Opens the bundled policy in-app (offline-safe); never depends on the website being up. */
+    fun openPrivacyPolicy(ctx: Context) = start(ctx, Intent(ctx, PrivacyPolicyActivity::class.java))
 
     internal fun start(ctx: Context, i: Intent) {
         if (ctx !is Activity) i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

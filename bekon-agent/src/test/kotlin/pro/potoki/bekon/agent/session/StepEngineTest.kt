@@ -40,4 +40,12 @@ class StepEngineTest {
         assertEquals(SetupStep.GESTURES, missing)
         assertEquals(SetupStep.GESTURES.ordinal, e.stepIndex)
     }
+
+    @Test
+    fun reconcileClearsToDoneWhenNothingMissing() {
+        val e = StepEngine(notReady())
+        val missing = e.reconcile(from = SetupStep.SCREEN.ordinal)
+        assertEquals(null, missing)
+        assertEquals(SetupStep.DONE.ordinal, e.stepIndex)
+    }
 }

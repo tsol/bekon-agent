@@ -76,6 +76,11 @@
             android:excludeFromRecents="true" />
 
         <activity
+            android:name=".consent.PrivacyPolicyActivity"
+            android:exported="false"
+            android:label="Privacy policy" />
+
+        <activity
             android:name=".access.AccessPromptActivity"
             android:exported="false"
             android:excludeFromRecents="true"

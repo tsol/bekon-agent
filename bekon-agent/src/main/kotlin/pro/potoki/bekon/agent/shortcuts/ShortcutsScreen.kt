@@ -39,6 +39,8 @@ fun ShortcutsScreen(onBack: () -> Unit) {
     var adding by remember { mutableStateOf(false) }
     fun reload() { items = store.list() }
 
+    // Back from "Add shortcut" returns to the list (registered after the parent's handler, so it wins).
+    androidx.activity.compose.BackHandler(enabled = adding) { adding = false }
     if (adding) {
         AddShortcutScreen(
             onBack = { adding = false },

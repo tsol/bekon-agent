@@ -37,7 +37,7 @@ class StepEngine(
     fun reconcile(from: Int = 0): SetupStep? {
         stepIndex = from
         val missing = nextMissing(from)
-        if (missing != null) stepIndex = missing.ordinal
+        stepIndex = missing?.ordinal ?: SetupStep.DONE.ordinal
         return missing
     }
 }
