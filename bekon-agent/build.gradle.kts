@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -32,8 +34,31 @@ android {
         }
     }
 
+    // Upload key for Google Play: read from env or (gitignored) local.properties. Never commit secrets.
+    // Keys: BEKON_UPLOAD_STORE_FILE, BEKON_UPLOAD_STORE_PASSWORD, BEKON_UPLOAD_KEY_ALIAS, BEKON_UPLOAD_KEY_PASSWORD
+    val localProps = Properties().apply {
+        val f = rootProject.file("local.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    fun signingProp(k: String): String? = System.getenv(k) ?: localProps.getProperty(k)
+    val uploadStoreFile = signingProp("BEKON_UPLOAD_STORE_FILE")
+    val hasUploadKey = uploadStoreFile != null && file(uploadStoreFile).exists() &&
+        signingProp("BEKON_UPLOAD_STORE_PASSWORD") != null
+    signingConfigs {
+        if (hasUploadKey) {
+            create("upload") {
+                storeFile = file(uploadStoreFile!!)
+                storePassword = signingProp("BEKON_UPLOAD_STORE_PASSWORD")
+                keyAlias = signingProp("BEKON_UPLOAD_KEY_ALIAS") ?: "upload"
+                keyPassword = signingProp("BEKON_UPLOAD_KEY_PASSWORD") ?: signingProp("BEKON_UPLOAD_STORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // Without an upload key the release bundle is left unsigned (not uploadable).
+            if (hasUploadKey) signingConfig = signingConfigs.getByName("upload")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
