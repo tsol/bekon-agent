@@ -189,9 +189,6 @@ object GestureOverlay {
             textSize = 36f
             setShadowLayer(4f, 0f, 1f, Color.BLACK)
         }
-        private val banner = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(180, 0, 0, 0)
-        }
         private val coachBx = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; strokeWidth = 10f; color = Color.argb(255, 66, 133, 244)
         }
@@ -239,10 +236,14 @@ object GestureOverlay {
             val ox = loc[0].toFloat()
             val oy = loc[1].toFloat()
 
-            drawCoach(canvas, ox, oy)
+            // Branded bacon frame along the full screen perimeter (no top text banners).
+            canvas.save()
+            canvas.translate(-ox, -oy)
+            val dm = resources.displayMetrics
+            pro.potoki.bekon.agent.coach.BaconFrame.draw(canvas, dm.widthPixels.toFloat().coerceAtLeast(width + ox), dm.heightPixels.toFloat().coerceAtLeast(height + oy), dm.density)
+            canvas.restore()
 
-            canvas.drawRect(0f, 0f, width.toFloat(), 72f, banner)
-            canvas.drawText("Bekon taps (calibration)", 24f, 48f, text)
+            drawCoach(canvas, ox, oy)
 
             for (m in marks) {
                 when (m) {
@@ -290,22 +291,33 @@ object GestureOverlay {
                 val lab = c.label
                 val tw = coachLabelPaint.measureText(lab)
                 val bx0 = ((l + r) / 2f - tw / 2f).coerceIn(8f, width - tw - 8f)
-                val by0 = (t - 56f).coerceAtLeast(8f)
+                val minY = safeTop() + 52f
+                val by0 = if (t - 56f >= minY) t - 56f else (b + 52f).coerceAtMost(height - safeBottom() - 12f)
                 canvas.drawRoundRect(bx0 - 12f, by0 - 44f, bx0 + tw + 12f, by0 + 6f, 10f, 10f, coachBg)
                 canvas.drawText(lab, bx0, by0, coachLabelPaint)
-            } else {
-                // no bbox: full-width banner near the top
-                val lab = c.label
-                val w = coachLabelPaint.measureText(lab)
-                canvas.drawRect(0f, 120f, width.toFloat(), 204f, coachBg)
-                canvas.drawText(lab, (width - w) / 2f, 164f, coachLabelPaint)
             }
+            // no bbox: no top banner — the bacon frame alone signals coach mode.
         }
 
         private fun drawLabel(canvas: Canvas, x: Float, y: Float, label: String) {
             val w = text.measureText(label)
             val left = (x - w / 2f).coerceIn(8f, (width - w - 8f).coerceAtLeast(8f))
-            canvas.drawText(label, left, y.coerceIn(100f, height - 24f), text)
+            val lo = safeTop() + 48f
+            val hi = (height - safeBottom() - 24f).coerceAtLeast(lo)
+            canvas.drawText(label, left, y.coerceIn(lo, hi), text)
+        }
+
+        // Status bar / cutout / nav bar + bacon strip, in view coords.
+        private fun safeTop(): Float {
+            val loc = IntArray(2); getLocationOnScreen(loc)
+            val ins = rootWindowInsets
+            val sys = if (ins != null) maxOf(ins.stableInsetTop, ins.displayCutout?.safeInsetTop ?: 0) else 0
+            return (maxOf(sys, (resources.displayMetrics.density * 30).toInt()) - loc[1]).coerceAtLeast(0).toFloat() + 8f
+        }
+        private fun safeBottom(): Float {
+            val ins = rootWindowInsets
+            val sys = ins?.stableInsetBottom ?: 0
+            return (maxOf(sys, 0) + resources.displayMetrics.density * 30).toFloat() + 8f
         }
     }
 }
