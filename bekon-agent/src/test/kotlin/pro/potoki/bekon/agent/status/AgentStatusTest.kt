@@ -58,4 +58,17 @@ class AgentStatusTest {
         assertTrue(en.contains("notif_agent_finished"))
         assertEquals(en, ru)
     }
+
+    @Test fun stripsDuplicateStateLabel() {
+        assertEquals("Нажмите Разрешить", AgentStatus.parse("Нужны вы: нажмите Разрешить", "waiting", null, null).text)
+        assertEquals("Tap Allow", AgentStatus.parse("NEED YOU — tap Allow", "waiting", null, null).text)
+        assertEquals("Нужны вы", AgentStatus.parse("Нужны вы", "waiting", null, null).text)
+        assertEquals("Нужны вы: x", AgentStatus.parse("Нужны вы: x", "working", null, null).text)
+    }
+
+    @Test fun stepNeedsValidTotal() {
+        val r = AgentStatus.parse("x", "working", null, null, null, 2, 4)
+        assertEquals(2, r.step); assertEquals(4, r.total)
+        assertEquals(null, AgentStatus.parse("x", "working", null, null, null, 5, 4).step)
+    }
 }

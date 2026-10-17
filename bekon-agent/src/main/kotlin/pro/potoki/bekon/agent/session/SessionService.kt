@@ -138,8 +138,13 @@ class SessionService : Service() {
         createChannel()
         acquireWakeLock()
         stepEngine = StepEngine(stepDetectors())
-        requestBatteryOptimizationQuietly()
+        // No battery-optimization dialog on start: it is an optional step the human or agent opens on purpose.
         pro.potoki.bekon.agent.device.capture.ScreenCapture.onSystemStop = { onCaptureLost() }
+        scope.launch {
+            pro.potoki.bekon.agent.access.AgentConnections.connected.collect {
+                if (_state.value.isRunning) try { updateNotification(statusText()) } catch (_: Exception) {}
+            }
+        }
         scope.launch {
             pro.potoki.bekon.agent.status.AgentStatus.current.collect {
                 if (_state.value.isRunning) try { updateNotification(statusText()) } catch (_: Exception) {}
@@ -477,11 +482,13 @@ class SessionService : Service() {
                 StatusState.WORKING -> R.string.status_working; StatusState.WAITING -> R.string.status_waiting
                 StatusState.DONE -> R.string.status_done; StatusState.ERROR -> R.string.status_error
             })
-            if (st.state == StatusState.DONE) st.text else "$lab · ${st.text}"
+            if (st.state == StatusState.DONE) st.text else "$lab: ${st.text}"
         } else text
+        val caps = if (_state.value.isRunning) pro.potoki.bekon.agent.status.Capabilities.line(this, step = st?.step, total = st?.total) else null
         return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSubText(caps)
             .setContentTitle(title)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(if (body != text) "$body\n$text" else body))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(body, caps, text.takeIf { it != body }).joinToString("\n")))
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.notif_stop_disconnect), stopPi)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)

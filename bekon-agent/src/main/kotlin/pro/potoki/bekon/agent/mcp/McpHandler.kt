@@ -47,6 +47,7 @@ class McpHandler(
         const val COACH_INSTRUCTIONS =
             "Coaching a human (e.g. device setup): you decide what to coach; Bekon only waits. " +
                 "Loop: snapshot (keep its baseline token) -> coach_draw a hint on the exact control -> " +
+                "Build every hint from the CURRENT snapshot (its refs/bounds), never from assumed or remembered layouts: menus differ per phone and Android version. " +
                 "wait_for_change with that baseline -> read the diff (added/removed/changed, toggles 'off -> on') -> next hint or coach_clear when done. " +
                 "Never ask the human to type or say 'done'. Never stop to wait for chat replies during setup; " +
                 "if wait_for_change times out (changed=false), re-check the screen and call it again. " +
@@ -56,8 +57,9 @@ class McpHandler(
                 "so coach the human in chat with annotated screenshots to scroll and tap themselves (never use tap/swipe for the human). Marks are cleared automatically when wait_for_change sees a change."
         const val STATUS_INSTRUCTIONS =
             "Keep the human informed on the phone with agent_status (a small pill inside the bacon frame; touches pass through): " +
-                "call agent_status state=working with a short text when you start a task, state=waiting when the human must act (e.g. 'Нужны вы: нажмите Разрешить'), " +
+                "call agent_status state=working with a short text when you start a task, state=waiting when the human must act (e.g. 'Нажмите «Разрешить»'; the pill already shows the state label, so do NOT prefix the text with 'Нужны вы:'/'Working:' etc.), optional step/total to show 'шаг 2 из 4', " +
                 "state=error if you are stuck, and state=done with a one-line summary when finished (e.g. 'Готово — можно остановить доступ'). " +
+                "The pill also shows live capabilities (sees screen / can tap / paused), also returned as capabilities in agent_status and connection_info: trust them, not assumptions. " +
                 "Write the text in the HUMAN's language: use deviceInfo.language from initialize/connection_info/agent_status (device locale, e.g. ru = Russian) unless the human writes to you in another language. Keep it under ~60 characters."
         const val READ_ONLY = "device is in read-only mode so this action was declined."
         val WRITE_TOOLS = setOf(
@@ -535,7 +537,7 @@ class McpHandler(
         "shortcuts" -> shortcutStore().listPayload()
         "agent_status" -> {
             val req = pro.potoki.bekon.agent.status.AgentStatus.parse(
-                args.strOr("text"), args.strOr("state"), args.intOr("ttlMs")?.toLong(), args.boolOr("clear"), args.strOr("position"))
+                args.strOr("text"), args.strOr("state"), args.intOr("ttlMs")?.toLong(), args.boolOr("clear"), args.strOr("position"), args.intOr("step"), args.intOr("total"))
             val st = pro.potoki.bekon.agent.status.AgentStatus.apply(req)
             val overlay = pro.potoki.bekon.agent.device.touch.GestureOverlay.canShowStatus()
             val ctx = pro.potoki.bekon.agent.BekonApp.appContext
@@ -553,6 +555,7 @@ class McpHandler(
                     else -> "notification-only"
                 })
                 put("deviceInfo", deviceInfoJson())
+                put("capabilities", pro.potoki.bekon.agent.status.Capabilities.json())
                 put("text", when {
                     st == null -> "status cleared"
                     overlay -> "status '${st.text}' (${st.state.wire}) shown on the phone in the overlay pill" +
@@ -567,6 +570,7 @@ class McpHandler(
             val u = pro.potoki.bekon.agent.handoff.Handoff.currentUrl
             buildJsonObject {
                 put("deviceInfo", deviceInfoJson())
+                put("capabilities", pro.potoki.bekon.agent.status.Capabilities.json())
                 put("endpoint", u?.let { pro.potoki.bekon.agent.handoff.Handoff.endpoint(it) } ?: "")
                 put("text", u?.let { pro.potoki.bekon.agent.handoff.Handoff.text(it) } ?: "Bekon Agent MCP (Android remote control). No public tunnel URL yet.")
             }
@@ -683,6 +687,8 @@ class McpHandler(
                 str("state", enum = listOf("working", "done", "waiting", "error"), required = false)
                 int("ttlMs", required = false)
                 str("position", enum = listOf("bottom", "top"), required = false)
+                int("step", required = false)
+                int("total", required = false)
                 add("clear", buildJsonObject { put("type", "boolean"); put("description", "Remove the status") }, false)
             },
         )

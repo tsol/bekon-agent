@@ -67,7 +67,11 @@ shortcuts, shortcut_open, device_setup_guide, open_setup_screen, connection_info
 
 ## Status for the human (agent_status)
 - At the start of a task: `agent_status` {state:"working", text:"Настраиваю Wi-Fi…"}.
-- When the human must act: {state:"waiting", text:"Нужны вы: нажмите «Разрешить»"}.
+- When the human must act: {state:"waiting", text:"Нажмите «Разрешить»", step:2, total:4}. The pill already shows the state
+  label ("Нужны вы"), so never prefix the text with it. step/total are optional ("шаг 2 из 4").
+- The pill's second line shows live capabilities (видит экран / может нажимать / пауза); `capabilities` in agent_status and
+  connection_info has the same booleans (screenVisible, gesturesConnected, canTap, readOnly, paused). Trust them.
+- Build every coach hint from the CURRENT snapshot (refs/bounds). Never assume a layout from memory or another phone.
 - When finished: {state:"done", text:"Готово — можно остановить доступ"} (also updates the notification to "Agent finished").
 - {state:"error"} when stuck; {clear:true} to remove. Keep text under ~60 chars, in the human's language.
 

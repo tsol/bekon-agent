@@ -23,7 +23,7 @@ object AgentStatus {
         companion object { fun of(s: String?): State? = entries.firstOrNull { it.wire == s?.trim()?.lowercase() } }
     }
 
-    data class Status(val text: String, val state: State, val setAtMs: Long, val ttlMs: Long, val top: Boolean = false)
+    data class Status(val text: String, val state: State, val setAtMs: Long, val ttlMs: Long, val top: Boolean = false, val step: Int? = null, val total: Int? = null)
 
     const val MAX_CHARS = 80
     const val MAX_TTL_MS = 3_600_000L
@@ -35,13 +35,13 @@ object AgentStatus {
     private var ttlJob: Job? = null
 
     /** Validated request; pure so it can be unit-tested. */
-    data class Request(val text: String, val state: State, val ttlMs: Long, val clear: Boolean, val truncated: Boolean, val top: Boolean = false)
+    data class Request(val text: String, val state: State, val ttlMs: Long, val clear: Boolean, val truncated: Boolean, val top: Boolean = false, val step: Int? = null, val total: Int? = null)
 
-    fun parse(text: String?, state: String?, ttlMs: Long?, clear: Boolean?, position: String? = null): Request {
+    fun parse(text: String?, state: String?, ttlMs: Long?, clear: Boolean?, position: String? = null, step: Int? = null, total: Int? = null): Request {
         if (clear == true) return Request("", State.WORKING, 0, true, false)
         val st = if (state.isNullOrBlank()) State.WORKING
             else State.of(state) ?: throw IllegalArgumentException("state must be one of working|done|waiting|error")
-        val t = (text ?: "").replace(Regex("\\s+"), " ").trim()
+        val t = stripLabel((text ?: "").replace(Regex("\\s+"), " ").trim(), st)
         if (t.isEmpty()) throw IllegalArgumentException("text is required (short, ≤ ~60 chars) unless clear=true")
         val cut = t.length > MAX_CHARS
         val out = if (cut) t.take(MAX_CHARS - 1).trimEnd() + "…" else t
@@ -51,14 +51,33 @@ object AgentStatus {
             "top" -> true
             else -> throw IllegalArgumentException("position must be top|bottom")
         }
-        return Request(out, st, ttl, false, cut, top)
+        val tot = total?.takeIf { it in 1..99 }
+        val stp = step?.takeIf { tot != null && it in 1..tot }
+        return Request(out, st, ttl, false, cut, top, stp, if (stp != null) tot else null)
+    }
+
+    /** Labels the pill already shows per state (ru+en); agents often repeat them as a prefix. */
+    private val LABELS = mapOf(
+        State.WAITING to listOf("нужны вы", "нужна ваша помощь", "ваш ход", "need you", "needs you", "your turn", "waiting"),
+        State.WORKING to listOf("работаю", "working"),
+        State.DONE to listOf("агент закончил", "готово", "agent finished", "done"),
+        State.ERROR to listOf("проблема", "ошибка", "problem", "error"),
+    )
+
+    /** "Нужны вы: нажмите Разрешить" -> "нажмите Разрешить" (only when something follows the label). */
+    fun stripLabel(text: String, state: State): String {
+        for (l in LABELS[state].orEmpty().sortedByDescending { it.length }) {
+            val m = Regex("^" + Regex.escape(l) + "\\s*[:—–\\-!.]+\\s*(.+)$", setOf(RegexOption.IGNORE_CASE)).find(text)
+            if (m != null) return m.groupValues[1].replaceFirstChar { it.uppercase() }
+        }
+        return text
     }
 
     @Synchronized
     fun apply(r: Request): Status? {
         ttlJob?.cancel(); ttlJob = null
         if (r.clear) { _current.value = null; return null }
-        val s = Status(r.text, r.state, System.currentTimeMillis(), r.ttlMs, r.top)
+        val s = Status(r.text, r.state, System.currentTimeMillis(), r.ttlMs, r.top, r.step, r.total)
         _current.value = s
         if (r.ttlMs > 0) ttlJob = scope.launch {
             delay(r.ttlMs)

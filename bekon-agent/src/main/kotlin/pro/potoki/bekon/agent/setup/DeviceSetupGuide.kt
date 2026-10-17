@@ -66,8 +66,13 @@ class DeviceSetupGuide(
         // Order: restricted settings, accessibility, notifications, vendor steps, generic battery, projection.
         val head = common.filter { it.s("req") in setOf("restricted_settings", "accessibility", "notifications") }
         val tail = common.filter { it.s("req") in setOf("battery", "projection") }
-        return (head + v + tail).filter(::applies)
+        // Battery steps (generic Unrestricted, Samsung sleeping apps, MIUI battery saver) are optional and go last.
+        val (vBattery, vOther) = v.partition { isOptional(it) }
+        return (head + vOther + tail.filter { !isOptional(it) } + vBattery + tail.filter { isOptional(it) }).filter(::applies)
     }
+
+    /** Optional: nice-to-have for long sessions, never needed to connect; never opened automatically. */
+    fun isOptional(step: JsonObject): Boolean = step.s("req") == "battery"
 
     /** true/false when detectable, null when unknown. */
     fun status(req: String): Boolean? = when (req) {
@@ -108,6 +113,7 @@ class DeviceSetupGuide(
                         st.forEach { (k, e) -> if (k != "intents") put(k, e) }
                         put("titleLocalized", st.loc("title")); put("pathLocalized", st.loc("path"))
                         put("canOpen", (st["intents"] as? JsonArray)?.isNotEmpty() == true)
+                        put("optional", isOptional(st))
                         val s = status(st.s("req"))
                         put("status", if (s == null) "unknown" else if (s) "ok" else "todo")
                     })
@@ -119,7 +125,7 @@ class DeviceSetupGuide(
                 list.forEachIndexed { i, st ->
                     val s = status(st.s("req"))
                     val mark = if (s == null) "?" else if (s) "✓" else "✗"
-                    append("${i + 1}. [$mark] ${st.s("id")}: ${st.loc("title")} — ${st.loc("path")}\n")
+                    append("${i + 1}. [$mark] ${st.s("id")}${if (isOptional(st)) " (optional — only if the session gets killed)" else ""}: ${st.loc("title")} — ${st.loc("path")}\n")
                 }
                 append(data["attribution"]!!.let { (it as JsonPrimitive).content })
             })
