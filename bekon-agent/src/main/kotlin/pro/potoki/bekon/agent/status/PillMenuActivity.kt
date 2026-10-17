@@ -5,7 +5,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -46,15 +45,22 @@ class PillMenuActivity : Activity() {
             val t = goal.text?.toString()?.trim().orEmpty()
             if (t.isNotEmpty()) { clearHints(); UserEvents.add("new_goal", t); finish() }
         }
-        val alsoStop = CheckBox(this).apply { setText(R.string.pill_also_stop); textSize = 15f }
         big(R.string.pill_cancel_all) {
             clearHints()
             AgentStatus.clear()
-            UserEvents.add("cancel_all", if (alsoStop.isChecked) "session stopped" else "session paused")
-            if (alsoStop.isChecked) SessionService.stop(this) else SessionService.setPaused(true)
+            UserEvents.add("cancel_all", "session paused")
+            SessionService.setPaused(true)
             finish()
         }
-        col.addView(alsoStop)
+        // Separate, explicit danger action (a checkbox under "Cancel everything" was ambiguous).
+        big(R.string.pill_stop_session) {
+            clearHints()
+            AgentStatus.clear()
+            UserEvents.add("cancel_all", "session stopped")
+            // Let a waiting wait_for_change/wait_for_script return the event before the server goes down.
+            android.os.Handler(mainLooper).postDelayed({ SessionService.stopNow(applicationContext) }, 1200)
+            finish()
+        }.apply { setTextColor(0xFFC62828.toInt()) }
         big(android.R.string.cancel) { finish() }
         setContentView(col)
     }

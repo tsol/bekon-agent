@@ -43,4 +43,5 @@
     <string name="access_replace_title">Заменить агента?</string>
     <string name="access_replace_message">Заменить агента «%1$s» на «%2$s»? Одновременно может быть подключён только один агент.</string>
     <string name="notif_ready_title">Bekon готов к подключению агента</string>
+    <string name="pill_stop_session">Остановить сеанс</string>
 </resources>

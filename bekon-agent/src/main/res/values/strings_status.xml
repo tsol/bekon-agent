@@ -43,4 +43,5 @@
     <string name="access_replace_title">Replace the agent?</string>
     <string name="access_replace_message">Replace agent «%1$s» with «%2$s»? Only one agent can be connected at a time.</string>
     <string name="notif_ready_title">Bekon is ready for your agent</string>
+    <string name="pill_stop_session">Stop the session</string>
 </resources>

@@ -76,6 +76,12 @@ class SessionService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(i)
             else context.startService(i)
         }
+        /** Stop right now in-process (no startService from the background); falls back to the intent. */
+        fun stopNow(context: Context) {
+            val svc = instance
+            if (svc != null) svc.main.post { svc.stopSession() } else stop(context)
+        }
+
         fun stop(context: Context) {
             val i = Intent(context, SessionService::class.java).setAction(ACTION_STOP)
             context.startService(i)
@@ -125,6 +131,7 @@ class SessionService : Service() {
     private var stepEngine: StepEngine? = null
     private var wakeLock: WakeLock? = null
     private var gate: ClientGate? = null
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
