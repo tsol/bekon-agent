@@ -23,7 +23,10 @@ object AgentStatus {
         companion object { fun of(s: String?): State? = entries.firstOrNull { it.wire == s?.trim()?.lowercase() } }
     }
 
-    data class Status(val text: String, val state: State, val setAtMs: Long, val ttlMs: Long, val top: Boolean = false, val step: Int? = null, val total: Int? = null)
+    data class Status(val text: String, val state: State, val setAtMs: Long, val ttlMs: Long, val top: Boolean = false, val step: Int? = null, val total: Int? = null, val res: Int = 0)
+
+    /** Text to show: system notices carry a string resource instead of agent text. */
+    fun textOf(ctx: android.content.Context, s: Status): String = if (s.res != 0) ctx.getString(s.res) else s.text
 
     const val MAX_CHARS = 80
     const val MAX_TTL_MS = 3_600_000L
@@ -87,6 +90,20 @@ object AgentStatus {
         }
         return s
     }
+
+    /** Bekon's own short notice (e.g. "Связь с агентом потеряна"), replaces any agent text, auto-clears. */
+    @Synchronized
+    fun notice(res: Int, ttlMs: Long = 5_000L) {
+        ttlJob?.cancel()
+        val s = Status("", State.ERROR, System.currentTimeMillis(), ttlMs, res = res)
+        _current.value = s
+        ttlJob = scope.launch {
+            delay(ttlMs)
+            synchronized(this@AgentStatus) { if (_current.value === s) _current.value = null }
+        }
+    }
+
+    fun isNotice(): Boolean = (_current.value?.res ?: 0) != 0
 
     fun clear() = apply(Request("", State.WORKING, 0, true, false))
 

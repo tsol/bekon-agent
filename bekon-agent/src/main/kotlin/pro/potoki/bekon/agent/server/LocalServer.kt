@@ -175,7 +175,7 @@ class LocalServer(
                 val base = pro.potoki.bekon.agent.handoff.Handoff.currentUrl
                 call.respondText(pro.potoki.bekon.agent.handoff.AgentGuide.markdown(base), ContentType.Text.Plain.withCharset(Charsets.UTF_8))
             }
-            post("/mcp") { mcp.handle(call) }
+            post("/mcp") { pro.potoki.bekon.agent.access.AgentConnections.busy { mcp.handle(call) } }
             get("/mcp") { mcp.handle(call) }
         }
         })

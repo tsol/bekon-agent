@@ -45,7 +45,7 @@ object StatusPill {
     private var manual: Pair<Int, Int>? = null
     private var lastStatus: AgentStatus.Status? = null
     private val tick = object : Runnable {
-        override fun run() { relayout(); main.postDelayed(this, 2000) }
+        override fun run() { refresh(); main.postDelayed(this, 2000) }
     }
 
     fun attach(svc: AccessibilityService) {
@@ -61,11 +61,13 @@ object StatusPill {
             refresh()
         } })
         pro.potoki.bekon.agent.coach.CoachOverlay.onMarksChanged = { relayout() }
+        main.removeCallbacks(tick); main.postDelayed(tick, 2000)
     }
 
     fun detach() {
         jobs.forEach { it.cancel() }; jobs.clear()
         pro.potoki.bekon.agent.coach.CoachOverlay.onMarksChanged = null
+        main.removeCallbacks(tick)
         main.post { remove() }
         host = null
     }
@@ -74,6 +76,8 @@ object StatusPill {
         val s = pro.potoki.bekon.agent.session.SessionService.state.value
         if (!s.isRunning || s.overlaysMustClear) return false
         if (pro.potoki.bekon.agent.status.PillMenuActivity.open) return false
+        // Bekon's own screens already show the state; the pill would cover our cards.
+        if (ownForeground()) return false
         return AgentStatus.current.value != null || pro.potoki.bekon.agent.access.AgentConnections.connected.value.isNotEmpty()
     }
 
@@ -86,8 +90,18 @@ object StatusPill {
 
     fun relayout() = main.post { relayoutNow() }
 
+    private fun ownForeground(): Boolean = try {
+        val pkg = TouchService.active?.rootInActiveWindow?.packageName?.toString()
+        pkg != null && pkg == host?.packageName
+    } catch (_: Exception) { false }
+
+    /** Keyboard window, if shown: the pill must stay above it and inside the screen. */
+    private fun imeRect(): Rect? = try {
+        host?.windows?.firstOrNull { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+            ?.let { w -> Rect().also { w.getBoundsInScreen(it) } }?.takeIf { !it.isEmpty }
+    } catch (_: Exception) { null }
+
     private fun remove() {
-        main.removeCallbacks(tick)
         val v = view ?: return
         try { wm?.removeView(v) } catch (_: Exception) {}
         view = null; params = null
@@ -111,7 +125,6 @@ object StatusPill {
             if (Build.VERSION.SDK_INT >= 28) p.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             w.addView(v, p)
             wm = w; view = v; params = p
-            main.removeCallbacks(tick); main.postDelayed(tick, 2000)
             v
         } catch (e: Exception) { null }
     }
@@ -155,11 +168,13 @@ object StatusPill {
         if (host == null) return
         val d = v.resources.displayMetrics.density
         val sc = screen()
+        val ime = imeRect()
+        if (ime != null && ime.top > sc.top + 100) sc.bottom = minOf(sc.bottom, ime.top)
         val (w, h) = v.measureNow()
         val (nx, ny) = if (dismissed) {
             (sc.right - w) to (sc.top + (sc.height() * 0.45f).toInt())
         } else {
-            val bad = avoid(d)
+            val bad = avoid(d) + listOfNotNull(ime?.let { RectF(it) })
             fun hits(x: Int, y: Int) = bad.any { RectF.intersects(it, RectF(x.toFloat(), y.toFloat(), (x + w).toFloat(), (y + h).toFloat())) }
             val m = manual
             if (m != null && !hits(m.first, m.second)) m else {
@@ -176,15 +191,13 @@ object StatusPill {
                 }
             }
         }
-        val cx2 = if (dismissed) nx else nx.coerceIn(0, (v.resources.displayMetrics.widthPixels - w).coerceAtLeast(0))
-        val cy2 = ny.coerceIn(0, (v.resources.displayMetrics.heightPixels - h).coerceAtLeast(0))
+        // Always clamp fully inside the usable area (above the keyboard). The old second pass re-applied the
+        // unclamped position on the next tick, which pushed the pill past the right edge with the IME open.
+        val cx2 = if (dismissed) nx else nx.coerceIn(sc.left, (sc.right - w).coerceAtLeast(sc.left))
+        val cy2 = ny.coerceIn(sc.top, (sc.bottom - h).coerceAtLeast(sc.top))
+        if (manual != null && !dismissed) manual = cx2 to cy2
         if (p.x != cx2 || p.y != cy2) {
             p.x = cx2; p.y = cy2
-            try { wm?.updateViewLayout(v, p) } catch (_: Exception) {}
-            return
-        }
-        if (p.x != nx || p.y != ny) {
-            p.x = nx; p.y = ny
             try { wm?.updateViewLayout(v, p) } catch (_: Exception) {}
         }
     }
@@ -217,6 +230,7 @@ object StatusPill {
             }
             line1 = when {
                 s == null -> context.getString(R.string.cap_agent, c.agent ?: "")
+                s.res != 0 -> context.getString(s.res)
                 s.state == StatusState.DONE -> s.text
                 else -> context.getString(labelRes) + ": " + s.text
             }
@@ -226,6 +240,7 @@ object StatusPill {
                 StatusState.DONE -> Color.argb(240, 30, 130, 60); StatusState.ERROR -> Color.argb(240, 190, 40, 40)
                 null -> Color.argb(225, 45, 45, 45)
             }
+            if (s != null && s.res != 0) bg.color = Color.argb(235, 90, 90, 96)
             requestLayout(); invalidate()
         }
 

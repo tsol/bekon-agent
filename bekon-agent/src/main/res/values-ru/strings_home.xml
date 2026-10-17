@@ -180,4 +180,8 @@
     <string name="g_sub_allowed">Разрешено</string>
     <string name="g_row_screen_time">Время использования экрана</string>
     <string name="accessibility_service_description">Удалённая помощь Bekon: подключённый вами агент видит, что на экране, и может нажимать, листать и вводить текст за вас. Данные уходят только агенту, которого вы разрешили на этом телефоне. Это не инструмент для людей с ограниченными возможностями.</string>
+    <string name="agent_gone">Агент отключился</string>
+    <string name="agent_link_lost">Связь с агентом потеряна</string>
+    <string name="g_cant_find">Не вижу такого пункта</string>
+    <string name="g_ask_agent_body">Отправьте ссылку агенту — он посмотрит экран и подскажет.</string>
 </resources>

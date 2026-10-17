@@ -183,4 +183,8 @@ Summary, briefly: what looks fine and what raises questions.</string>
     <string name="g_scr_appinfo_oneui">App info</string>
     <string name="g_sub_allowed">Allowed</string>
     <string name="g_row_screen_time">Screen time</string>
+    <string name="agent_gone">Agent disconnected</string>
+    <string name="agent_link_lost">Connection to the agent lost</string>
+    <string name="g_cant_find">I don\'t see this item</string>
+    <string name="g_ask_agent_body">Send the link to your agent — it will look at the screen and guide you.</string>
 </resources>

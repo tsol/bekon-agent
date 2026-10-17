@@ -246,6 +246,8 @@ object GestureOverlay {
         private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
         private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
         private val trail = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+        private val trailFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val trailPath = android.graphics.Path()
         private val arrow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; strokeJoin = Paint.Join.ROUND }
         init {
             val sh = Color.argb(70, 0, 0, 0)
@@ -381,12 +383,22 @@ object GestureOverlay {
             val hx = x1 + (x2 - x1) * p; val hy = y1 + (y2 - y1) * p
             dot.color = accent(0.6f * fade)
             c.drawCircle(x1, y1, 6f * dp, dot)
-            val n = 18
-            for (i in 0 until n) {
-                val f0 = i / n.toFloat(); val f1 = (i + 1) / n.toFloat()
-                trail.strokeWidth = (2f + 6f * f1) * dp
-                trail.color = accent((0.15f + 0.7f * f1) * fade)
-                c.drawLine(x1 + (hx - x1) * f0, y1 + (hy - y1) * f0, x1 + (hx - x1) * f1, y1 + (hy - y1) * f1, trail)
+            // One filled tapered polygon + gradient shader: smooth, no overlapping alpha "beads".
+            val tl = kotlin.math.hypot(hx - x1, hy - y1)
+            if (tl > 1f) {
+                val nx = -(hy - y1) / tl; val ny = (hx - x1) / tl
+                val w0 = 1f * dp; val w1 = 4f * dp
+                trailPath.reset()
+                trailPath.moveTo(x1 + nx * w0, y1 + ny * w0)
+                trailPath.lineTo(hx + nx * w1, hy + ny * w1)
+                trailPath.lineTo(hx - nx * w1, hy - ny * w1)
+                trailPath.lineTo(x1 - nx * w0, y1 - ny * w0)
+                trailPath.close()
+                trailFill.shader = android.graphics.LinearGradient(x1, y1, hx, hy, accent(0.12f * fade), accent(0.85f * fade), android.graphics.Shader.TileMode.CLAMP)
+                c.drawPath(trailPath, trailFill)
+                trailFill.shader = null
+                trailFill.color = accent(0.85f * fade)
+                c.drawCircle(hx, hy, w1, trailFill)
             }
             val dx = x2 - x1; val dy = y2 - y1
             val len = kotlin.math.hypot(dx, dy)

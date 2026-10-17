@@ -241,15 +241,16 @@ class SessionService : Service() {
                         srv.start()
                     }
                     val t = tunnel
-                    if (t != null && !t.isAlive()) {
-                        Log.w(TAG, "tunnel down — restarting")
+                    if (t != null && (!t.isAlive() || probeFailed)) {
+                        Log.w(TAG, "tunnel down (alive=${t.isAlive()}, probeFailed=$probeFailed) — restarting, new URL")
+                        probeFailed = false
                         t.stop()
                         t.start()
                     }
                     return tunnel?.publicUrl
                 }
                 override fun isHealthy(): Boolean {
-                    return srv.isRunning() && (tunnel?.isAlive() ?: false)
+                    return !probeFailed && srv.isRunning() && (tunnel?.isAlive() ?: false)
                 }
             },
             onUrl = { url ->
@@ -260,15 +261,46 @@ class SessionService : Service() {
             onSessionDown = { reason ->
                 // Tunnel died — keep capture alive, report and let the supervisor restart.
                 Log.w(TAG, "session down: $reason")
+                pro.potoki.bekon.agent.access.AgentConnections.lost(tunnel = true)
                 _state.value = _state.value.copy(publicUrl = null, error = "tunnel down: $reason")
                 updateNotification(statusText())
             },
         )
         supervisor = sup
         sup.start()
+        startProbe()
+    }
+
+    @Volatile private var probeFailed = false
+    private var probeThread: Thread? = null
+
+    /**
+     * cloudflared can stay alive while the edge has dropped the tunnel (agent sees HTTP 530). Probe our own
+     * public /health every 30 s; two failures in a row = tunnel dead -> supervisor restarts it (new URL).
+     */
+    private fun startProbe() {
+        probeThread?.interrupt()
+        probeThread = Thread {
+            var fails = 0
+            while (true) {
+                try { Thread.sleep(30_000) } catch (_: InterruptedException) { break }
+                val u = tunnel?.publicUrl
+                if (u == null) { fails = 0; continue }
+                val ok = try {
+                    val c = java.net.URL("$u/health").openConnection() as java.net.HttpURLConnection
+                    c.connectTimeout = 10_000; c.readTimeout = 10_000
+                    val code = c.responseCode; c.disconnect()
+                    if (code !in 200..499) Log.w(TAG, "tunnel probe HTTP $code")
+                    code in 200..499
+                } catch (e: Exception) { Log.w(TAG, "tunnel probe: ${e.javaClass.simpleName}"); false }
+                fails = if (ok) 0 else fails + 1
+                if (fails >= 2) { probeFailed = true; fails = 0 }
+            }
+        }.apply { isDaemon = true; name = "bekon-tunnel-probe"; start() }
     }
 
     private fun stopSession() {
+        probeThread?.interrupt(); probeThread = null; probeFailed = false
         pro.potoki.bekon.agent.access.AgentConnections.clear()
         gate?.reset()
         Log.i(TAG, "stopSession")
@@ -351,8 +383,9 @@ class SessionService : Service() {
      */
     private fun onCaptureLost() {
         if (!_state.value.captureGranted) return
-        Log.w(TAG, "capture lost: projection stopped by the system")
-        _state.value = _state.value.copy(captureGranted = false, stepIndex = 0) // re-derive: SCREEN is missing again
+        val why = pro.potoki.bekon.agent.device.capture.ScreenCapture.lastLossReason ?: "unknown"
+        Log.w(TAG, "capture lost: $why")
+        _state.value = _state.value.copy(captureGranted = false, stepIndex = 0, error = "capture lost: $why") // re-derive: SCREEN is missing again
         if (_state.value.isRunning && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // Drop the mediaProjection FGS type; keep the session (tunnel, gestures) alive.
             promoteForeground(withProjection = false)
@@ -515,13 +548,18 @@ class SessionService : Service() {
                 StatusState.WORKING -> R.string.status_working; StatusState.WAITING -> R.string.status_waiting
                 StatusState.DONE -> R.string.status_done; StatusState.ERROR -> R.string.status_error
             })
-            if (st.state == StatusState.DONE) st.text else "$lab: ${st.text}"
+            if (st.res != 0) getString(st.res) else if (st.state == StatusState.DONE) st.text else "$lab: ${st.text}"
         } else text
+        val regrant = if (_state.value.isRunning && !_state.value.captureGranted) PendingIntent.getActivity(
+            this, 3, Intent(this, CapturePermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        ) else null
         val caps = if (_state.value.isRunning) pro.potoki.bekon.agent.status.Capabilities.line(this, step = st?.step, total = st?.total) else null
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSubText(caps)
             .setContentTitle(title)
             .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(body, caps, text.takeIf { it != body }).joinToString("\n")))
+            .apply { if (regrant != null) addAction(android.R.drawable.ic_menu_view, getString(R.string.capture_lost_verb), regrant) }
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.notif_stop_disconnect), stopPi)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)

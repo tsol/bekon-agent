@@ -251,7 +251,44 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
                 modifier = Modifier.fillMaxWidth().height(BTN_H),
                 shape = BTN_SHAPE,
             ) { Text(stringResource(btn), maxLines = 1) }
+            if (guided && !busy) GuideFallback(state.publicUrl)
         }
+    }
+}
+
+/** "Не вижу такого пункта": with a live link, ask the agent to look at the screen; otherwise open generic Accessibility settings. */
+@Composable
+private fun GuideFallback(url: String?) {
+    val ctx = LocalContext.current
+    val show = remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.material3.TextButton(
+        onClick = {
+            if (!url.isNullOrBlank()) show.value = true
+            else try { ctx.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) } catch (_: Exception) {}
+        },
+        modifier = Modifier.fillMaxWidth().height(40.dp),
+    ) { Text(stringResource(R.string.g_cant_find), style = MaterialTheme.typography.labelLarge, maxLines = 1) }
+    if (show.value && !url.isNullOrBlank()) {
+        val msg = remember(url) { Handoff.text(url) }
+        val copied = stringResource(R.string.qr_copied_agent)
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { show.value = false },
+            title = { Text(stringResource(R.string.g_cant_find)) },
+            text = { Text(stringResource(R.string.g_ask_agent_body)) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    show.value = false
+                    ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, msg), null))
+                }) { Text(stringResource(R.string.wiz_share)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    show.value = false
+                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("bekon handoff", msg))
+                    Toast.makeText(ctx, copied, Toast.LENGTH_SHORT).show()
+                }) { Text(stringResource(R.string.wiz_copy)) }
+            },
+        )
     }
 }
 

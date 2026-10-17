@@ -26,6 +26,8 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
         private const val TAG = "ScreenCapture"
         /** Fired when the OS ends the projection (lock screen, "Stop sharing" chip, etc.). */
         @Volatile var onSystemStop: (() -> Unit)? = null
+        /** Best-effort reason for the last system stop (keyguard / screen off / chip or other projection), for logs + state. */
+        @Volatile var lastLossReason: String? = null
         private const val TIMEOUT_MS = 5000L
         private const val SKIP_BLACK_MS = 1500L
         private const val BLACK_CHANNEL = 8
@@ -43,9 +45,24 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
     private val captureThread = HandlerThread("ScreenCapture").apply { start() }
     private val captureHandler = Handler(captureThread.looper)
     @Volatile private var skipBlackUntil = 0L
+    @Volatile private var startedAt = 0L
+    @Volatile private var contentVisible = true
     private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onCapturedContentVisibilityChanged(isVisible: Boolean) {
+            contentVisible = isVisible
+            Log.i(TAG, "captured content visible=$isVisible")
+        }
+
         override fun onStop() {
-            Log.i(TAG, "MediaProjection stopped by system")
+            val km = context.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+            val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            val secs = if (startedAt > 0) (System.currentTimeMillis() - startedAt) / 1000 else -1
+            lastLossReason = (when {
+                km.isKeyguardLocked -> "keyguard (phone locked)"
+                !pm.isInteractive -> "screen off"
+                else -> "stopped while unlocked (Stop-sharing chip/notification, or another app started screen recording/cast)"
+            }) + ", after ${secs}s" + (if (!contentVisible) ", captured content was hidden" else "")
+            Log.w(TAG, "MediaProjection stopped by system: $lastLossReason")
             try { onSystemStop?.invoke() } catch (e: Exception) { Log.w(TAG, "onSystemStop: ${e.message}") }
             captureHandler.post {
                 releasePreviewDisplay()
@@ -91,6 +108,7 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
         // Android 14+ requires a callback before createVirtualDisplay; harmless on 13/Itel.
         mp.registerCallback(projectionCallback, captureHandler)
         mediaProjection = mp
+        startedAt = System.currentTimeMillis(); contentVisible = true; lastLossReason = null
         bindPreviewDisplay()
         Log.i(TAG, "Virtual display created: ${width}x${height}")
     }
