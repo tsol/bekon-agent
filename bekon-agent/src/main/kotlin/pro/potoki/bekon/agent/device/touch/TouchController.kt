@@ -371,8 +371,11 @@ class TouchController(private val svc: AccessibilityService) {
             }
             val k = keys.lastOrNull()
             if (k == null) false
-            else if (k.isClickable && k.performAction(AccessibilityNodeInfo.ACTION_CLICK)) true
-            else { k.getBoundsInScreen(r); tap(r.exactCenterX(), r.exactCenterY()) }
+            else {
+                // Samsung Keyboard keys: a real gesture tap on the key's bounds is what the keyboard reacts to.
+                k.getBoundsInScreen(r)
+                tap(r.exactCenterX(), r.exactCenterY()) || (k.isClickable && k.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            }
         }
         else -> false
     }

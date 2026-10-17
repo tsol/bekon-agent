@@ -222,11 +222,20 @@ class LinkControl(
                     }
                     sb.append("</li>\n")
                 }
-                for (n in visible) {
+                val fpOrd = HashMap<String, Int>(); val labOrd = HashMap<String, Int>()
+                val ords = allVisible.associateWith { m -> fpOrd.merge(fpKey(m), 1, Int::plus)!! - 1 }
+                val labelNo = allVisible.associateWith { m -> labOrd.merge(m.window + "\u0000" + m.label, 1, Int::plus)!! }
+                val labelCount = labOrd
+                for (n0 in visible) {
+                    // Fingerprint carries the ordinal among identical (window,label,class,editable) nodes.
+                    val n = n0.copy(ref = "#" + (ords[n0] ?: 0))
                     sb.append("<li>")
                     val win = n.window?.takeIf { it.isNotBlank() && it != "application" }
                     if (win != null) sb.append("<b>[${esc(win)}]</b> ")
                     sb.append(esc(displayLabel(n)))
+                    if ((labelCount[n.window + "\u0000" + n.label] ?: 1) > 1) {
+                        sb.append(esc(if (n.editable) " (field)" else " #${labelNo[n0] ?: 1}"))
+                    } else if (n.editable) sb.append(" (field)")
                     if (n.clickable || n.checkable) sb.append(" <i>[actionable]</i>")
                     if (n.checkable) sb.append(if (n.checked) " ✓" else " ○")
                     val b = n.bounds
@@ -323,16 +332,17 @@ class LinkControl(
                 val before = if (act is Act.Tap || act is Act.Type || act is Act.Long) pageSig() else null
                 var extraNote = ""
                 when (act) {
-                    is Act.Tap -> if (cb == null || !nodeClick(cb, false)) executor.tap(cur?.x ?: act.x, cur?.y ?: act.y)
+                    is Act.Tap -> extraNote = tapSmart(cur, act.x, act.y)
                     is Act.Long -> if (cb == null || !nodeClick(cb, true)) executor.longPress(cur?.x ?: act.x, cur?.y ?: act.y)
                     is Act.Type -> {
                         // Ktor already URL-decodes query values; do not decode twice.
                         val text = query["text"] ?: ""
                         if (text.isEmpty()) return@busy screen(token, note = "type needs ?text=")
-                        if (cb == null || !nodeClick(cb, false)) executor.tap(cur?.x ?: act.x, cur?.y ?: act.y)
+                        // Gesture tap on the field: real touch also brings the keyboard up (needed for its enter key).
+                        executor.tap(cur?.x ?: act.x, cur?.y ?: act.y)
                         Thread.sleep(350) // focus lands; typeText waits up to 1.2 s more for an input-focused field
                         executor.typeText(text, replace = true, asKeys = false)
-                        if (query["enter"] == "1" || query["submit"] == "1") { Thread.sleep(200); extraNote = "; " + submit(cur ?: fp) }
+                        if (query["enter"] == "1" || query["submit"] == "1") { Thread.sleep(200); extraNote = "; " + submit(cur ?: fp, text) }
                     }
                     is Act.Swipe -> scrollVerified(act)
                     is Act.Nav -> executor.nav(act.action)
@@ -459,6 +469,25 @@ class LinkControl(
 
 
 
+    /**
+     * Tap the re-found element, verified by a page change. Web nodes: gesture tap first (ACTION_CLICK on Chrome
+     * virtual nodes often returns true and does nothing), then ACTION_CLICK. Native: ACTION_CLICK first, then gesture.
+     */
+    private fun tapSmart(cur: UiNode?, x: Int, y: Int): String {
+        val b = cur?.bounds
+        if (cur == null || b == null) { executor.tap(x, y); return "" }
+        val before = pageSig()
+        if (isWeb(cur)) {
+            executor.tap(cur.x, cur.y)
+            if (waitChanged(before)) return ""
+            if (nodeClick(b, false) && waitChanged(before)) return " (via click action)"
+            return " (no visible change)"
+        }
+        if (nodeClick(b, false) && waitChanged(before)) return ""
+        executor.tap(cur.x, cur.y)
+        return if (waitChanged(before)) " (via gesture)" else " (no visible change)"
+    }
+
     private fun nodeClick(b: IntArray, long: Boolean): Boolean = try { executor.clickNode(b, long) } catch (_: CapabilityException) { false }
 
     /** Find [fp] in a fresh snapshot: same window, label, view id and class; nearest to its old position. */
@@ -471,7 +500,7 @@ class LinkControl(
      * Submit after typing, verifying each method by a page change: IME action → IME key event → injected key →
      * keyboard's enter key → a visible Search/Найти button. Returns which one worked for the note.
      */
-    private fun submit(field: UiNode?): String {
+    private fun submit(field: UiNode?, typed: String): String {
         var before = pageSig()
         for (m in listOf("ime_action", "keys", "inject", "ime_key")) {
             val acted = try { executor.enterVia(m) } catch (_: Exception) { false }
@@ -479,8 +508,24 @@ class LinkControl(
             if (waitChanged(before)) return "submitted via $m"
             before = pageSig()
         }
+        // Keyboard may have closed after SET_TEXT: touch the field to bring it back, then press its enter key.
+        if (field != null) {
+            val f = refind(field) ?: field
+            executor.tap(f.x, f.y)
+            Thread.sleep(if (settleMs <= 0) 0 else 700)
+            before = pageSig()
+            if ((try { executor.enterVia("ime_key") } catch (_: Exception) { false }) && waitChanged(before)) return "submitted via keyboard enter key"
+            before = pageSig()
+        }
         val snap = try { executor.snapshot() } catch (_: Exception) { null }
-        val btn = snap?.let { findSubmitButton(prepareForLink(it.items, false), field) }
+        val prepared = snap?.let { prepareForLink(it.items, false) }
+        val phrase = prepared?.let { findSearchPhrase(it, typed) }
+        if (phrase != null) {
+            executor.tap(phrase.x, phrase.y)
+            if (waitChanged(before)) return "submitted via: ${phrase.label.take(50)}"
+            before = pageSig()
+        }
+        val btn = prepared?.let { findSubmitButton(it, field) }
         if (btn != null) {
             val b = btn.bounds
             if (b == null || !nodeClick(b, false)) executor.tap(btn.x, btn.y)
@@ -589,9 +634,33 @@ class LinkControl(
             }.let(::dropPieces)
 
         /** Drop plain text that is just a piece of a nearby actionable label (link "Name, description" then its parts). */
+        fun fpKey(n: UiNode) = listOf(n.window, n.label, n.viewId, n.cls, n.editable).joinToString("\u0000")
+
+        /** Same window/label/id/class/editable; the ordinal among those decides between duplicates, else nearest. */
         fun findFingerprint(items: List<UiNode>, fp: UiNode): UiNode? {
-            val c = items.filter { it.window == fp.window && it.label == fp.label && it.viewId == fp.viewId && it.cls == fp.cls }
+            val k = fpKey(fp)
+            val c = items.filter { fpKey(it) == k }
+            val ord = fp.ref.removePrefix("#").toIntOrNull()
+            if (ord != null && fp.ref.startsWith("#") && ord < c.size) return c[ord]
             return c.minByOrNull { (it.x - fp.x) * (it.x - fp.x) + (it.y - fp.y) * (it.y - fp.y) }
+        }
+
+        private val BROWSERS = setOf("com.android.chrome", "com.chrome.beta", "com.sec.android.app.sbrowser", "org.mozilla.firefox",
+            "com.yandex.browser", "com.opera.browser", "com.microsoft.emmx", "com.brave.browser", "com.duckduckgo.mobile.android")
+
+        /** Web content (Chrome/WebView virtual nodes): ACTION_CLICK often "succeeds" without navigating. */
+        fun isWeb(n: UiNode): Boolean =
+            (n.viewId != null && !n.viewId.contains(":id/")) || (n.cls == "android.view.View") ||
+                (n.pkg in BROWSERS && n.viewId == null)
+
+        private val SEARCH_PHRASE = Regex("""поиск|search|containing|содерж|искать""", RegexOption.IGNORE_CASE)
+
+        /** Wikipedia-style "Поиск страниц, содержащих <typed>" row. */
+        fun findSearchPhrase(items: List<UiNode>, typed: String): UiNode? {
+            val t = typed.trim().lowercase()
+            if (t.isEmpty()) return null
+            return items.firstOrNull { it.clickable && !it.editable && it.window != "ime" && it.window != "system" &&
+                it.label.lowercase().contains(t) && it.label.trim().lowercase() != t && SEARCH_PHRASE.containsMatchIn(it.label) }
         }
 
         private val SUBMIT = Regex("""^(найти|искать|поиск|search|go|перейти|submit|отправить|send|ok)$""", RegexOption.IGNORE_CASE)

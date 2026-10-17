@@ -377,11 +377,11 @@ class LinkControlDedupeTest {
             UiNode("a", "Хуахин", 300, 500, intArrayOf(0, 450, 1080, 550), true),
         )
         links.handle("GET", taps[0], emptyMap())
-        assertEquals(listOf("click:450"), ex.calls) // clicked Хуахин at its NEW place
+        assertEquals(listOf("click:450", "tap:300,500"), ex.calls) // Хуахин at its NEW place; no change -> gesture fallback
         ex.items = listOf(UiNode("c", "Другое", 300, 400, intArrayOf(0, 350, 1080, 450), true))
         val r = links.handle("GET", taps[1], emptyMap())!!.html!!
         assertTrue(r.contains("element moved/gone"))
-        assertEquals(1, ex.calls.size)
+        assertEquals(2, ex.calls.size)
     }
 
     @Test
@@ -392,5 +392,43 @@ class LinkControlDedupeTest {
         val text = UiNode("z", "Найти", 500, 1000, intArrayOf(400, 950, 600, 1050), false)
         assertEquals("Search", LinkControl.findSubmitButton(listOf(field, far, near, text), field)!!.label)
         assertEquals(null, LinkControl.findSubmitButton(listOf(field, text), field))
+    }
+
+    @Test
+    fun `duplicate labels disambiguated and second one is tapped by gesture`() {
+        UserEvents.drain()
+        val ex = Moving()
+        ex.items = listOf(
+            UiNode("f", "Хуахин", 400, 150, intArrayOf(0, 100, 900, 200), true, pkg = "com.android.chrome", cls = "android.widget.EditText", editable = true),
+            UiNode("s", "Хуахин", 300, 400, intArrayOf(0, 350, 1080, 450), true, pkg = "com.android.chrome", cls = "android.view.View"),
+            UiNode("p", "Поиск страниц, содержащих Хуахин", 300, 600, intArrayOf(0, 550, 1080, 650), true, pkg = "com.android.chrome", cls = "android.view.View"),
+        )
+        val (links, token) = linkSession(ex)
+        val page = links.handle("GET", "/s/$token/screen", emptyMap())!!.html!!
+        assertTrue(page.contains("Хуахин (field)")); assertTrue(page.contains("Хуахин #2"))
+        val taps = Regex("""href="https://ex\.test(/s/$token/do/[^"]+)">tap""").findAll(page).map { it.groupValues[1] }.toList()
+        links.handle("GET", taps[1], emptyMap())
+        assertEquals("tap:300,400", ex.calls.first()) // web: gesture at the suggestion's current center, not the field
+    }
+
+    @Test
+    fun `search phrase row is a submit candidate`() {
+        val items = listOf(
+            UiNode("f", "Хуахин", 400, 150, intArrayOf(0, 100, 900, 200), true, editable = true),
+            UiNode("s", "Хуахин", 300, 400, intArrayOf(0, 350, 1080, 450), true),
+            UiNode("p", "Поиск страниц, содержащих Хуахин", 300, 600, intArrayOf(0, 550, 1080, 650), true),
+        )
+        assertEquals("p", LinkControl.findSearchPhrase(items, "Хуахин")!!.ref)
+        assertEquals(null, LinkControl.findSearchPhrase(items, "Бангкок"))
+        assertTrue(LinkControl.isWeb(items[2].copy(cls = "android.view.View")))
+        assertTrue(!LinkControl.isWeb(UiNode("n", "OK", 1, 1, null, true, viewId = "com.x:id/ok", cls = "android.widget.Button")))
+    }
+
+    @Test
+    fun `fingerprint ordinal separates identical labels`() {
+        val a = UiNode("#0", "Item", 10, 10, intArrayOf(0, 0, 20, 20), true)
+        val list = listOf(a.copy(ref = "x"), a.copy(ref = "y", y = 50), a.copy(ref = "z", y = 90))
+        assertEquals("z", LinkControl.findFingerprint(list, a.copy(ref = "#2"))!!.ref)
+        assertEquals("x", LinkControl.findFingerprint(list, a.copy(ref = "#7"))!!.ref) // out of range -> nearest
     }
 }

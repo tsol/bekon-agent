@@ -64,7 +64,7 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
                 o.optBoolean("checkable"), o.optBoolean("checked"), o.optBoolean("selected"),
                 o.optBoolean("enabled", true), o.optString("pkg").ifEmpty { null }, o.optBoolean("statusBar"),
                 o.optString("win").ifEmpty { null },
-                o.optString("id").ifEmpty { null }, o.optString("class").ifEmpty { null }))
+                o.optString("id").ifEmpty { null }, o.optString("class").ifEmpty { null }, o.optBoolean("editable")))
         }
         val items = ArrayList<UiNode>()
         for (i in nodes.indices) {
@@ -78,7 +78,7 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
                     bounds = rn.bounds,
                     clickable = rn.clickable,
                     checkable = rn.checkable, checked = rn.checked, selected = rn.selected,
-                    enabled = rn.enabled, pkg = rn.pkg, statusBar = rn.statusBar, window = rn.window, viewId = rn.viewId, cls = rn.cls,
+                    enabled = rn.enabled, pkg = rn.pkg, statusBar = rn.statusBar, window = rn.window, viewId = rn.viewId, cls = rn.cls, editable = rn.editable,
                 )
             )
         }
@@ -247,5 +247,6 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
         val checkable: Boolean = false, val checked: Boolean = false, val selected: Boolean = false,
         val enabled: Boolean = true, val pkg: String? = null, val statusBar: Boolean = false,
         val window: String? = null, val viewId: String? = null, val cls: String? = null,
+        val editable: Boolean = false,
     )
 }

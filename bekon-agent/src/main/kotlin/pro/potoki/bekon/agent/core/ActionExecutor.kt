@@ -20,6 +20,7 @@ data class UiNode(
     /** view id / class from a11y (for unlabeled controls). */
     val viewId: String? = null,
     val cls: String? = null,
+    val editable: Boolean = false,
 )
 
 /**
