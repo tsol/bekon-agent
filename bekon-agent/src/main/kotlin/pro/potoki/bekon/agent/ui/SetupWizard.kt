@@ -105,8 +105,8 @@ private fun ConnectionCard(
         ConnState.READY -> MaterialTheme.colorScheme.primaryContainer
         else -> MaterialTheme.colorScheme.surfaceVariant
     }
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = container)) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Card(Modifier.fillMaxWidth(), shape = CARD_SHAPE, colors = CardDefaults.cardColors(containerColor = container)) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             val title = when (cs) {
                 ConnState.NOT_READY -> stringResource(R.string.conn_not_ready)
                 ConnState.READY -> stringResource(R.string.conn_ready)
@@ -131,8 +131,8 @@ private fun ConnectionCard(
                     Text(stringResource(R.string.conn_connected_body), style = MaterialTheme.typography.bodyMedium)
                     // Same grid as the share row: equal-width buttons, Stop in red (always-visible Stop, Play policy).
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (state.canShowQr) OutlinedButton(onClick = onShowQr, modifier = Modifier.weight(1f).height(48.dp), contentPadding = TIGHT) {
-                            Text(stringResource(R.string.show_qr_again), maxLines = 1)
+                        if (state.canShowQr) OutlinedButton(onClick = onShowQr, modifier = Modifier.weight(1f).height(BTN_H), shape = BTN_SHAPE, contentPadding = TIGHT) {
+                            BtnLabel(stringResource(R.string.show_qr_again))
                         }
                         StopButton({ onIntent(HomeIntent.Stop) }, Modifier.weight(1f))
                     }
@@ -182,8 +182,8 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
     val hNotif = stringResource(R.string.core_hint_notifications)
     val hRestr = stringResource(R.string.core_hint_restricted)
     val hA11y = stringResource(R.string.core_hint_a11y, section)
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Card(Modifier.fillMaxWidth(), shape = CARD_SHAPE) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(stringResource(coreTitle(current)), style = MaterialTheme.typography.titleMedium)
             Text(stringResource(coreSentence(current), section), style = MaterialTheme.typography.bodyLarge)
             val busy = current == CoreStep.SESSION && (state.phase == SessionPhase.STARTING || (state.isRunning && state.captureGranted))
@@ -214,7 +214,8 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
                         CoreStep.READY -> {}
                     }
                 },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier.fillMaxWidth().height(BTN_H),
+                shape = BTN_SHAPE,
             ) { Text(stringResource(coreVerb(current, state))) }
         }
     }
@@ -243,7 +244,7 @@ private fun coreVerb(c: CoreStep, s: HomeState) = when (c) {
 private fun ShareButtons(url: String, onShowQr: () -> Unit, onStop: (() -> Unit)?) {
     val ctx = LocalContext.current
     val msg = remember(url) { Handoff.text(url) }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         run {
             Text(stringResource(R.string.wiz_share_body), style = MaterialTheme.typography.bodyLarge)
             val copied = stringResource(R.string.qr_copied_agent)
@@ -251,13 +252,13 @@ private fun ShareButtons(url: String, onShowQr: () -> Unit, onStop: (() -> Unit)
                 (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
                     .setPrimaryClip(ClipData.newPlainText("bekon handoff", msg))
                 Toast.makeText(ctx, copied, Toast.LENGTH_SHORT).show()
-            }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(stringResource(R.string.wiz_copy)) }
+            }, modifier = Modifier.fillMaxWidth().height(BTN_H), shape = BTN_SHAPE) { Text(stringResource(R.string.wiz_copy), maxLines = 1) }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = {
                     val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, msg)
                     ctx.startActivity(Intent.createChooser(send, null))
-                }, modifier = Modifier.weight(1f).height(48.dp), contentPadding = TIGHT) { Text(stringResource(R.string.wiz_share), maxLines = 1) }
-                OutlinedButton(onClick = onShowQr, modifier = Modifier.weight(1f).height(48.dp), contentPadding = TIGHT) { Text(stringResource(R.string.wiz_show_qr), maxLines = 1) }
+                }, modifier = Modifier.weight(1f).height(BTN_H), shape = BTN_SHAPE, contentPadding = TIGHT) { BtnLabel(stringResource(R.string.wiz_share)) }
+                OutlinedButton(onClick = onShowQr, modifier = Modifier.weight(1f).height(BTN_H), shape = BTN_SHAPE, contentPadding = TIGHT) { BtnLabel(stringResource(R.string.wiz_show_qr)) }
                 if (onStop != null) StopButton(onStop, Modifier.weight(1f))
             }
         }
@@ -265,7 +266,17 @@ private fun ShareButtons(url: String, onShowQr: () -> Unit, onStop: (() -> Unit)
 }
 
 
-private val TIGHT = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+private val TIGHT = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+private val BTN_H = 52.dp
+private val BTN_SHAPE = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+private val CARD_SHAPE = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
+
+/** Single-line label for the narrow 3-up button row: slightly smaller type so Russian labels never truncate. */
+@Composable
+private fun BtnLabel(text: String) {
+    Text(text, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+}
 
 /** Outlined Stop in the error colour; same height/shape as the other card buttons. */
 @Composable
@@ -273,9 +284,10 @@ private fun StopButton(onStop: () -> Unit, modifier: Modifier) {
     val err = MaterialTheme.colorScheme.error
     OutlinedButton(
         onClick = onStop,
-        modifier = modifier.height(48.dp),
+        modifier = modifier.height(BTN_H),
+        shape = BTN_SHAPE,
         contentPadding = TIGHT,
         border = androidx.compose.foundation.BorderStroke(1.dp, err),
         colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = err),
-    ) { Text(stringResource(R.string.home_stop), maxLines = 1) }
+    ) { BtnLabel(stringResource(R.string.home_stop)) }
 }

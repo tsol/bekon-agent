@@ -200,9 +200,11 @@ fun BekonHome(state: HomeState, tick: Int = 0, onIntent: (HomeIntent) -> Unit) {
     Scaffold(
         bottomBar = { HomeFooter(state, onIntent) },
     ) { pad ->
+      Column(Modifier.padding(pad).fillMaxSize()) {
         Column(
-            Modifier.padding(pad).padding(16.dp).fillMaxSize().verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -225,13 +227,18 @@ fun BekonHome(state: HomeState, tick: Int = 0, onIntent: (HomeIntent) -> Unit) {
 
             if (state.phase == SessionPhase.FAILED) SetupCard(state, onIntent)
 
-            val ctx = androidx.compose.ui.platform.LocalContext.current
-            // Stacked: side by side the long Russian labels wrapped mid-word.
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                TextButton(onClick = { Consent.showDisclosure(ctx, Consent.Kind.A11Y) }) { Text(stringResource(R.string.home_a11y_disclosure), maxLines = 1, softWrap = false) }
-                TextButton(onClick = { Consent.openPrivacyPolicy(ctx) }) { Text(stringResource(R.string.home_privacy), maxLines = 1, softWrap = false) }
-            }
         }
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        // Pinned to the bottom, just above the bottom bar; small and muted. Stacked so long Russian labels never wrap.
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FooterLink(stringResource(R.string.home_a11y_disclosure)) { Consent.showDisclosure(ctx, Consent.Kind.A11Y) }
+            FooterLink(stringResource(R.string.home_privacy)) { Consent.openPrivacyPolicy(ctx) }
+        }
+      }
     }
 
     // System Back closes the in-app overlays instead of leaving the app.
@@ -244,6 +251,17 @@ fun BekonHome(state: HomeState, tick: Int = 0, onIntent: (HomeIntent) -> Unit) {
     if (showShortcuts) {
         ShortcutsScreen(onBack = { showShortcuts = false })
     }
+}
+
+@Composable
+private fun FooterLink(text: String, onClick: () -> Unit) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1, softWrap = false,
+        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 4.dp),
+    )
 }
 
 @Composable
