@@ -196,7 +196,7 @@ class LocalServer(
             // Link-control FALLBACK (GET-only chatbots). Token lives in the path; same expiry as MCP.
             get("/link/{rest...}") {
                 val q = call.request.queryParameters.names().associateWith { call.request.queryParameters[it] ?: "" }
-                val page = links.handle("GET", call.request.path(), q)
+                val page = linkPage(links, call.request.path(), q)
                     ?: return@get call.respond(HttpStatusCode.NotFound, "not found")
                 call.response.headers.append("Cache-Control", "no-store")
                 call.response.headers.append("X-Robots-Tag", "noindex, nofollow")
@@ -204,7 +204,7 @@ class LocalServer(
             }
             get("/s/{rest...}") {
                 val q = call.request.queryParameters.names().associateWith { call.request.queryParameters[it] ?: "" }
-                val page = links.handle("GET", call.request.path(), q)
+                val page = linkPage(links, call.request.path(), q)
                     ?: return@get call.respond(HttpStatusCode.NotFound, "not found")
                 call.response.headers.append("Cache-Control", "no-store")
                 call.response.headers.append("X-Robots-Tag", "noindex, nofollow")
@@ -214,7 +214,7 @@ class LocalServer(
                     call.respondText(page.html ?: "", ContentType.Text.Html.withCharset(Charsets.UTF_8), HttpStatusCode.fromValue(page.status))
                 }
             }
-            post("/mcp") { pro.potoki.bekon.agent.access.AgentConnections.busy { mcp.handle(call) } }
+            post("/mcp") { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pro.potoki.bekon.agent.access.AgentConnections.busy { mcp.handle(call) } } }
             get("/mcp") { mcp.handle(call) }
         }
         })
@@ -230,5 +230,15 @@ class LocalServer(
         running = false
         engine?.stop(800, 2000)
         engine = null
+    }
+
+/** Link handling blocks (sleeps, settle loops): run on IO, never on CIO's event loop, and never throw out. */
+private suspend fun linkPage(links: LinkControl, path: String, q: Map<String, String>): LinkControl.Page? =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try { links.handle("GET", path, q) } catch (t: Throwable) {
+            android.util.Log.e("LocalServer", "link handler failed: ${t.javaClass.simpleName}", t)
+            pro.potoki.bekon.agent.CrashLog.note("link handler: $t", t)
+            LinkControl.Page(500, "<!doctype html><html><body>Internal error: ${t.javaClass.simpleName}. Open /screen again.</body></html>")
+        }
     }
 }

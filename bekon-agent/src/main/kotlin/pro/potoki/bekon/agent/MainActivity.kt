@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     BekonHome(state = state, tick = resumeTick.value, onIntent = ::dispatchIntent)
                 }
+                CrashDialog()
             }
         }
     }
@@ -626,3 +627,29 @@ private fun SettingsMenuButton() {
         }
     }
 }
+
+/** "Bekon stopped unexpectedly" with Share (crash.log has no tokens) — shown once per new log content. */
+@androidx.compose.runtime.Composable
+private fun CrashDialog() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val text = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(CrashLog.unseen(ctx)) }
+    if (text.value.isBlank()) return
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = { CrashLog.markSeen(ctx); text.value = "" },
+        title = { androidx.compose.material3.Text("Bekon stopped unexpectedly") },
+        text = { androidx.compose.material3.Text("A diagnostic log was saved. Share it with the developer to help fix this.\n\n" + text.value.take(600)) },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_SUBJECT, "Bekon crash log")
+                    .putExtra(android.content.Intent.EXTRA_TEXT, CrashLog.text(ctx).takeLast(60_000))
+                ctx.startActivity(android.content.Intent.createChooser(send, null))
+                CrashLog.markSeen(ctx); text.value = ""
+            }) { androidx.compose.material3.Text("Share log") }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = { CrashLog.markSeen(ctx); text.value = "" }) { androidx.compose.material3.Text("Dismiss") }
+        },
+    )
+}
+

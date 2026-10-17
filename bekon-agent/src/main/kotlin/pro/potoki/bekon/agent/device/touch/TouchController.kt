@@ -293,7 +293,8 @@ class TouchController(private val svc: AccessibilityService) {
      * Input-focused editable in ANY window (browser URL bars and popups live outside rootInActiveWindow),
      * waiting briefly for focus to land after a tap; then first editable in the active window.
      */
-    private fun focusedEditable(waitMs: Long = 1_200): AccessibilityNodeInfo? {
+    private fun focusedEditable(waitMs0: Long = 1_200): AccessibilityNodeInfo? {
+        val waitMs = if (Looper.myLooper() == Looper.getMainLooper()) 0L else waitMs0 // never sleep on main
         val deadline = android.os.SystemClock.uptimeMillis() + waitMs
         while (true) {
             val f = try { svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } catch (_: Exception) { null }

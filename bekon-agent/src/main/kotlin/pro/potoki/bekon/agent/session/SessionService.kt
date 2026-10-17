@@ -309,13 +309,18 @@ class SessionService : Service() {
                 if (u == null) { fails = 0; continue }
                 val ok = try {
                     val c = java.net.URL("$u/health").openConnection() as java.net.HttpURLConnection
-                    c.connectTimeout = 10_000; c.readTimeout = 10_000
+                    c.connectTimeout = 15_000; c.readTimeout = 20_000
                     val code = c.responseCode; c.disconnect()
                     if (code !in 200..499) Log.w(TAG, "tunnel probe HTTP $code")
                     code in 200..499
                 } catch (e: Exception) { Log.w(TAG, "tunnel probe: ${e.javaClass.simpleName}"); false }
-                fails = if (ok) 0 else fails + 1
-                if (fails >= 2) { probeFailed = true; fails = 0 }
+                // A slow local action (link settle, web snapshot) must not look like a dead tunnel:
+                // don't count failures while requests are in flight; restart only after 3 misses in a row
+                // AND confirming the local server still answers (otherwise it's our problem, not the tunnel's).
+                val busy = pro.potoki.bekon.agent.access.AgentConnections.inFlight.get() > 0
+                fails = when { ok -> 0; busy -> fails; else -> fails + 1 }
+                if (!ok) pro.potoki.bekon.agent.CrashLog.note("tunnel probe miss #$fails (busy=$busy)")
+                if (fails >= 3) { probeFailed = true; fails = 0; pro.potoki.bekon.agent.CrashLog.note("tunnel probe: restarting tunnel") }
             }
         }.apply { isDaemon = true; name = "bekon-tunnel-probe"; start() }
     }

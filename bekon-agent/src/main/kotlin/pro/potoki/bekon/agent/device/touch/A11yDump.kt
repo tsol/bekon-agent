@@ -48,26 +48,10 @@ object A11yDump {
 
     fun dumpJson(): String? {
         val svc = TouchService.active ?: return null
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            return dumpOnService(svc)
-        }
-        val box = arrayOfNulls<String>(1)
-        val latch = CountDownLatch(1)
-        Handler(Looper.getMainLooper()).post {
-            try {
-                box[0] = dumpOnService(TouchService.active)
-            } catch (e: Exception) {
-                Log.w(TAG, "dump: ${e.message}")
-            } finally {
-                latch.countDown()
-            }
-        }
-        return try {
-            latch.await(2, TimeUnit.SECONDS)
-            box[0]
-        } catch (_: InterruptedException) {
-            null
-        }
+        // 1.0.23: walk on the CALLING (server) thread. AccessibilityNodeInfo reads are binder IPC and safe off-main;
+        // posting a 2500-node web walk to the main thread several times a second (settle loops) froze the UI
+        // thread -> ANR -> process (and its cloudflared child) killed -> tunnel 1033.
+        return try { dumpOnService(svc) } catch (e: Exception) { Log.w(TAG, "dump: ${e.message}"); null }
     }
 
     private fun dumpOnService(svc: TouchService?): String? {

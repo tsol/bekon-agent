@@ -19,14 +19,15 @@ class BekonApp : Application() {
         val def = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             Log.e(TAG, "UNCAUGHT on ${t.name}", e)
-            try {
-                applicationContext.openFileOutput("crash.log", MODE_PRIVATE).use { out ->
-                    out.write("${System.currentTimeMillis()} ${e}\n".toByteArray())
-                    e.stackTrace.forEach { it -> out.write("  at $it\n".toByteArray()) }
-                }
-            } catch (_: Exception) {}
+            CrashLog.note("UNCAUGHT on thread ${t.name}: $e", e)
+            // A background-thread exception must not take the whole service + tunnel down.
+            if (t !== android.os.Looper.getMainLooper().thread) {
+                Log.e(TAG, "background thread ${t.name} died; process kept alive")
+                return@setDefaultUncaughtExceptionHandler
+            }
             def?.uncaughtException(t, e)
         }
+        Thread { CrashLog.recordExitReasons(applicationContext) }.start()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             StrictMode.setVmPolicy(
                 StrictMode.VmPolicy.Builder().detectLeakedSqlLiteObjects().penaltyLog().build()

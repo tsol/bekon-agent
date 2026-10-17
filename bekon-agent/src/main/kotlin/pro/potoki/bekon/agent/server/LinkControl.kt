@@ -449,11 +449,10 @@ class LinkControl(
 
 
     /** Cheap page signature: foreground title + text/bounds of the snapshot. */
-    private fun pageSig(): Int = try {
-        val fg = executor.foreground()
-        val snap = executor.snapshot()
-        31 * (fg["title"] ?: "").hashCode() + snap.items.joinToString("|") { it.label + it.bounds?.joinToString(",") }.hashCode()
-    } catch (_: Exception) { 0 }
+    private fun pageSig(): Int = try { sigOf(executor.foreground()["title"], executor.snapshot()) } catch (_: Exception) { 0 }
+
+    private fun sigOf(title: String?, snap: pro.potoki.bekon.agent.core.ScreenSnapshot): Int =
+        31 * (title ?: "").hashCode() + snap.items.joinToString("|") { it.label + it.bounds?.joinToString(",") }.hashCode()
 
     /** Scroll action first; if the page did not change (WebView often reports success and stays put), swipe 75%→25%. */
     private fun scrollVerified(act: Act.Swipe): Boolean {
@@ -476,12 +475,15 @@ class LinkControl(
         if (settleMs <= 0) return // unit tests
         val start = System.currentTimeMillis()
         settleQuiet(debounceMs = 600, maxMs = 1_500)
+        // One snapshot per round, at most ~every 500 ms: snapshots of long web pages are not free.
         while (System.currentTimeMillis() - start < NAV_SETTLE_MS) {
-            val changed = before == null || pageSig() != before
-            val loading = try { executor.snapshot().items.any { (it.cls ?: "").contains("ProgressBar") && it.pkg == executor.foreground()["package"] } } catch (_: Exception) { false }
-            if (changed && !loading) break
-            Thread.sleep(250)
-            settleQuiet(debounceMs = 400, maxMs = 800)
+            val (sig, loading) = try {
+                val fgPkg = executor.foreground()["package"]
+                val snap = executor.snapshot()
+                sigOf(executor.foreground()["title"], snap) to snap.items.any { (it.cls ?: "").contains("ProgressBar") && it.pkg == fgPkg }
+            } catch (_: Exception) { return }
+            if ((before == null || sig != before) && !loading) break
+            settleQuiet(debounceMs = 400, maxMs = 500)
         }
     }
 
