@@ -217,7 +217,24 @@ class SessionService : Service() {
                     shortcuts = pro.potoki.bekon.agent.shortcuts.ShortcutStore(applicationContext),
                     setup = pro.potoki.bekon.agent.setup.DeviceSetupGuide(applicationContext) { _state.value.captureGranted },
                 )
-                val srv = LocalServer(DEFAULT_PORT, ex, mcp, { tunnel?.publicUrl != null }, gate, readOnly = { _state.value.readOnly })
+                val srv = LocalServer(
+                    DEFAULT_PORT, ex, mcp, { tunnel?.publicUrl != null }, gate,
+                    readOnly = { _state.value.readOnly },
+                    linkApps = object : pro.potoki.bekon.agent.server.LinkControl.Apps {
+                        override fun list() = pro.potoki.bekon.agent.shortcuts.launchableApps(applicationContext)
+                            .map { it.label to it.packageName }
+                        override fun open(pkg: String) {
+                            val i = packageManager.getLaunchIntentForPackage(pkg)
+                                ?: throw pro.potoki.bekon.agent.core.CapabilityException("no launchable app $pkg")
+                            startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    },
+                    linkCoach = object : pro.potoki.bekon.agent.server.LinkControl.Coach {
+                        override fun draw(shapes: List<pro.potoki.bekon.agent.coach.Shape>, append: Boolean) =
+                            ex.drawOnScreen(shapes, append, 0L)
+                        override fun clear() { ex.clearScreen() }
+                    },
+                )
                 srv.start()
                 server = srv
                 startSupervisor(srv)

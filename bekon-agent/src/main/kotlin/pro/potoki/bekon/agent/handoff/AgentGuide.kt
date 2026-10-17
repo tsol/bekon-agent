@@ -15,8 +15,9 @@ object AgentGuide {
     fun markdown(baseUrl: String?): String {
         val base = baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/mcp")?.takeIf { it.isNotEmpty() }
         val mcp = base?.let { "$it/mcp" } ?: "/mcp"
+        val root = base ?: ""
         val hdr = ClientGate.HEADER
-        return connectBlock(mcp) + """
+        return connectBlock(mcp, root) + """
 
 # Bekon: an Android phone shared with you over MCP
 
@@ -127,16 +128,20 @@ ${SERVER_INSTRUCTIONS}
 
     /** Short hint for GET /mcp without a JSON-RPC body. */
     /** Universal "how to connect" block shown first on / , /llms.txt and GET /mcp. No app-specific links. */
-    fun connectBlock(mcp: String): String = """
+    fun connectBlock(mcp: String, root: String = ""): String {
+        val link = (root.trimEnd('/').ifEmpty { null }?.let { "$it/link/start" }) ?: "/link/start"
+        return """
 # HOW TO CONNECT (read first)
-- If you can make HTTP POST requests: use JSON-RPC 2.0 at $mcp (details below).
-- If your tool can only read web pages (no POST): ask the user to add $mcp as a custom MCP connector
-  (transport: Streamable HTTP, auth: none) in your app's settings, then use its tools.
-  Hints: chat apps usually have Settings -> Connectors / Integrations -> "Add custom connector";
-  IDE/CLI agents usually have an MCP servers config (add a server with type "http" and this URL);
-  automation tools usually offer an "MCP client" / "HTTP Request" node.
+- **Preferred — MCP:** if you can make HTTP POST requests, use JSON-RPC 2.0 at $mcp (details below).
+  Or ask the user to add $mcp as a custom MCP connector (Streamable HTTP, no auth) in your app's settings.
+  Hints: chat apps → Settings / Connectors / Integrations → "Add custom connector";
+  IDE/CLI agents → MCP servers config (type "http" + this URL); automation tools → "MCP client" / "HTTP Request" node.
+- **Fallback — links only:** if you cannot use MCP or POST (you can only open URLs you see), start at
+  $link?client=<your-short-name>. The owner taps Allow; then open the session link you get and follow
+  the on-screen action links (one-shot). Prefer MCP whenever you can.
 - The owner approves you on the phone; nothing else is needed (no account, no API key).
 """.trimStart()
+    }
 
     const val ROBOTS_TXT = """User-agent: *
 Allow: /
@@ -161,6 +166,6 @@ Allow: /
         "Bekon MCP endpoint: POST JSON-RPC 2.0 here with header ${ClientGate.HEADER}: <stable-id>; after the owner approves you, " +
             "also send Authorization: Bearer <bekon_session_token> from the approved response. " +
             "Read GET / (this server's root) first for full instructions. " +
-            "If you cannot send POST requests (web reader only), ask the user to add this URL as a custom MCP connector " +
-            "(Streamable HTTP, no auth) in your app's settings, then use its tools."
+            "Prefer MCP/POST. Fallback if you can only open links: start at GET /link/start?client=<name> " +
+            "(or ask the user to add this /mcp URL as a custom MCP connector: Streamable HTTP, no auth)."
 }

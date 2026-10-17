@@ -61,6 +61,15 @@ class ClientGate(
     /** Session end / Stop / owner revoke: every token is invalid from now on. */
     @Synchronized fun reset() { tokens.clear() }
 
+    /** Path-token auth for link-control: constant-time match against the issued session token. Returns clientId or null. */
+    @Synchronized fun tokenFor(clientId: String): String? = tokens[clientId]
+
+    @Synchronized fun clientForToken(token: String?): String? {
+        val t = token?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        for ((id, expected) in tokens) if (constantTimeEquals(expected, t)) return id
+        return null
+    }
+
     @Synchronized private fun issue(id: String): String {
         tokens[id]?.let { return it }
         tokens.clear() // one agent at a time: approving a replacement revokes the previous agent's token

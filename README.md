@@ -12,7 +12,7 @@ visible frame, a notification and a one-tap **Stop** are shown for the whole ses
 
 ## Verify this build / ask your agent to audit
 
-Every release is tagged with its version (`v1.0.1` … `v1.0.16`, …). The app's
+Every release is tagged with its version (`v1.0.1` … `v1.0.17`, …). The app's
 "ask your agent to check our code" button opens the tag matching the installed version, for example
 <https://github.com/tsol/bekon-agent/tree/v1.0.9>.
 
@@ -26,6 +26,9 @@ Hand that link to your AI agent and ask it to review:
 4. That the Stop button, pause and read-only modes really cut access.
 
 ## Connecting an agent (auth)
+
+**Preferred:** MCP JSON-RPC at `/mcp` (POST). **Fallback** for chatbots that can only open links: `/link/start?client=<name>` → owner Allow → private `/s/<token>/screen` with one-shot action links (and coach highlights even in read-only).
+
 
 The tunnel URL stays clean. Authentication is a per-session token issued by the phone after the owner approves:
 

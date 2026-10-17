@@ -39,7 +39,20 @@ class LocalServer(
     private val tunnelUp: () -> Boolean = { false },
     private val gate: ClientGate? = null,
     private val readOnly: () -> Boolean = { false },
+    private val linkApps: LinkControl.Apps? = null,
+    private val linkCoach: LinkControl.Coach? = null,
 ) {
+    private val links by lazy {
+        LinkControl(
+            executor = executor,
+            gate = gate,
+            readOnly = readOnly,
+            root = { pro.potoki.bekon.agent.handoff.Handoff.currentUrl?.trimEnd('/') ?: "" },
+            apps = linkApps,
+            coach = linkCoach,
+        )
+    }
+
     private var engine: CIOApplicationEngine? = null
     @Volatile private var running = false
     val boundPort: Int get() = port
@@ -71,7 +84,7 @@ class LocalServer(
                     return@intercept
                 }
                 val g = gate
-                if (g != null && path != "/health" && path != "/mcp" && path != "/robots.txt" && path !in GUIDE_PATHS) {
+                if (g != null && path != "/health" && path != "/mcp" && path != "/robots.txt" && path !in GUIDE_PATHS && !path.startsWith("/link/") && !path.startsWith("/s/")) {
                     val headers = call.request.headers
                     val ip = headers["CF-Connecting-IP"]?.trim()?.takeIf { it.isNotEmpty() }
                         ?: headers["X-Forwarded-For"]?.split(",")?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
@@ -179,7 +192,28 @@ class LocalServer(
             // Our own robots.txt. On trycloudflare the edge prepends its managed AI-crawler block; ours is appended
             // after it, so explicit Allow groups for user-triggered agents merge with (and per RFC 9309 win over) it.
             get("/robots.txt") { call.respondText(pro.potoki.bekon.agent.handoff.AgentGuide.ROBOTS_TXT, ContentType.Text.Plain.withCharset(Charsets.UTF_8)) }
-            for (p in GUIDE_PATHS + listOf("/mcp", "/robots.txt", "/health")) head(p) { call.respond(HttpStatusCode.OK) }
+            for (p in GUIDE_PATHS + listOf("/mcp", "/robots.txt", "/health", "/link/start")) head(p) { call.respond(HttpStatusCode.OK) }
+            // Link-control FALLBACK (GET-only chatbots). Token lives in the path; same expiry as MCP.
+            get("/link/{rest...}") {
+                val q = call.request.queryParameters.names().associateWith { call.request.queryParameters[it] ?: "" }
+                val page = links.handle("GET", call.request.path(), q)
+                    ?: return@get call.respond(HttpStatusCode.NotFound, "not found")
+                call.response.headers.append("Cache-Control", "no-store")
+                call.response.headers.append("X-Robots-Tag", "noindex, nofollow")
+                call.respondText(page.html ?: "", ContentType.Text.Html.withCharset(Charsets.UTF_8), HttpStatusCode.fromValue(page.status))
+            }
+            get("/s/{rest...}") {
+                val q = call.request.queryParameters.names().associateWith { call.request.queryParameters[it] ?: "" }
+                val page = links.handle("GET", call.request.path(), q)
+                    ?: return@get call.respond(HttpStatusCode.NotFound, "not found")
+                call.response.headers.append("Cache-Control", "no-store")
+                call.response.headers.append("X-Robots-Tag", "noindex, nofollow")
+                if (page.jpeg != null) {
+                    call.respondBytes(page.jpeg, ContentType.Image.JPEG, HttpStatusCode.fromValue(page.status))
+                } else {
+                    call.respondText(page.html ?: "", ContentType.Text.Html.withCharset(Charsets.UTF_8), HttpStatusCode.fromValue(page.status))
+                }
+            }
             post("/mcp") { pro.potoki.bekon.agent.access.AgentConnections.busy { mcp.handle(call) } }
             get("/mcp") { mcp.handle(call) }
         }

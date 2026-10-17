@@ -58,7 +58,7 @@ class LocalServerTest {
         val rb = robots.bodyAsText()
         assertTrue("robots allows user agents", rb.contains("User-agent: ChatGPT-User") && rb.contains("Allow: /") && !rb.contains("Disallow"))
         val root = client.get("http://127.0.0.1:$port/").bodyAsText()
-        assertTrue("connect block first", root.startsWith("# HOW TO CONNECT") && root.contains("custom MCP connector"))
+        assertTrue("connect block first", root.startsWith("# HOW TO CONNECT") && root.contains("Preferred") && root.contains("/link/start") && root.contains("Fallback"))
         val gm = client.get("http://127.0.0.1:$port/mcp")
         assertTrue("GET /mcp 200 with hint", gm.status.value == 200 && gm.bodyAsText().contains("custom MCP connector"))
         for (path in listOf("/", "/mcp", "/robots.txt", "/llms.txt")) {
