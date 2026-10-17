@@ -469,7 +469,8 @@ class SessionService : Service() {
         )
         // agent_status: shown here when it is "done" or when the a11y overlay pill is unavailable.
         val st = pro.potoki.bekon.agent.status.AgentStatus.current.value
-        val inNotif = st != null && (st.state == StatusState.DONE || !pro.potoki.bekon.agent.device.touch.GestureOverlay.canShowStatus())
+        // Latest agent text is always in the collapsed content so the human sees what the agent wants.
+        val inNotif = st != null
         val title = if (st?.state == StatusState.DONE) getString(R.string.notif_agent_finished) else getString(R.string.notif_session_title)
         val body = if (inNotif && st != null) {
             val lab = getString(when (st.state) {

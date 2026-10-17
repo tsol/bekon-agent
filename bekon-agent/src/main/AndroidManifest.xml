@@ -42,6 +42,10 @@
             </intent-filter>
         </activity>
 
+        <receiver
+            android:name=".access.AccessActionReceiver"
+            android:exported="false" />
+
         <service
             android:name=".session.SessionService"
             android:enabled="true"

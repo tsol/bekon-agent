@@ -31,7 +31,7 @@ class AccessPromptActivity : Activity() {
         val clientId = intent.getStringExtra(EXTRA_CLIENT) ?: ""
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.access_title))
-            .setMessage(getString(R.string.access_message, ip, clientId))
+            .setMessage(getString(R.string.access_message, clientId, ip))
             .setCancelable(false)
             .setPositiveButton(R.string.access_allow) { _, _ -> answer(token, true) }
             .setNegativeButton(R.string.access_deny) { _, _ -> answer(token, false) }
@@ -56,7 +56,7 @@ class AccessPromptActivity : Activity() {
     }
 
     companion object {
-        private const val EXTRA_TOKEN = "token"
+        const val EXTRA_TOKEN = "token"
         private const val EXTRA_IP = "ip"
         private const val EXTRA_CLIENT = "clientId"
         private const val CHANNEL = "bekon_access"
@@ -95,7 +95,7 @@ class AccessPromptActivity : Activity() {
                 putExtra(EXTRA_IP, ip)
                 putExtra(EXTRA_CLIENT, p.clientId)
             }
-            notify(context, intent, ip)
+            notify(context, intent, ip, p)
             try {
                 context.startActivity(intent)
             } catch (e: Exception) {
@@ -124,30 +124,44 @@ class AccessPromptActivity : Activity() {
             current?.get()?.let { appCtx -> closeUi(appCtx.applicationContext) }
         }
 
+        fun deliverFromNotification(context: Context, token: String, ok: Boolean) {
+            deliver(token, ok)
+            context.getSystemService(NotificationManager::class.java).cancel(NOTE_ID)
+        }
+
         private fun closeUi(context: Context) {
             context.getSystemService(NotificationManager::class.java).cancel(NOTE_ID)
             if (pending.isEmpty()) handler.post { current?.get()?.finish() }
         }
 
-        private fun notify(context: Context, intent: Intent, ip: String) {
+        private fun notify(context: Context, intent: Intent, ip: String, p: Pending) {
             val nm = context.getSystemService(NotificationManager::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 nm.createNotificationChannel(
-                    NotificationChannel(CHANNEL, "Bekon access", NotificationManager.IMPORTANCE_HIGH),
+                    NotificationChannel(CHANNEL, context.getString(R.string.access_channel), NotificationManager.IMPORTANCE_HIGH),
                 )
             }
             val pi = PendingIntent.getActivity(
                 context, 0, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+            fun action(a: String, code: Int) = PendingIntent.getBroadcast(
+                context, code,
+                Intent(context, AccessActionReceiver::class.java).setAction(a).putExtra(EXTRA_TOKEN, p.token),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val text = context.getString(R.string.access_note_text, p.clientId, ip)
             val note = NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(context.getString(R.string.access_title))
-                .setContentText(context.getString(R.string.access_note_text, ip))
+                .setContentTitle(context.getString(R.string.access_note_title, p.clientId))
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setContentIntent(pi)
                 .setFullScreenIntent(pi, true)
+                .addAction(0, context.getString(R.string.access_allow), action(AccessActionReceiver.ACTION_ALLOW, 1))
+                .addAction(0, context.getString(R.string.access_deny), action(AccessActionReceiver.ACTION_DENY, 2))
                 .setAutoCancel(true)
                 .build()
             nm.notify(NOTE_ID, note)

@@ -98,6 +98,7 @@ class DeviceSetupGuide(
                 put("sdk", Build.VERSION.SDK_INT); put("release", Build.VERSION.RELEASE)
                 put("rom", rom())
             })
+            put("language", lang())
             put("vendor", v?.s("id") ?: "generic")
             v?.get("dkma")?.let { put("moreInfo", it) }
             v?.get("notes")?.let { put("vendorNotes", it) }
@@ -105,6 +106,7 @@ class DeviceSetupGuide(
                 list.forEach { st ->
                     add(buildJsonObject {
                         st.forEach { (k, e) -> if (k != "intents") put(k, e) }
+                        put("titleLocalized", st.loc("title")); put("pathLocalized", st.loc("path"))
                         put("canOpen", (st["intents"] as? JsonArray)?.isNotEmpty() == true)
                         val s = status(st.s("req"))
                         put("status", if (s == null) "unknown" else if (s) "ok" else "todo")
@@ -117,7 +119,7 @@ class DeviceSetupGuide(
                 list.forEachIndexed { i, st ->
                     val s = status(st.s("req"))
                     val mark = if (s == null) "?" else if (s) "✓" else "✗"
-                    append("${i + 1}. [$mark] ${st.s("id")}: ${st["title"]!!.jsonObject.s("en")} — ${st["path"]!!.jsonObject.s("en")}\n")
+                    append("${i + 1}. [$mark] ${st.s("id")}: ${st.loc("title")} — ${st.loc("path")}\n")
                 }
                 append(data["attribution"]!!.let { (it as JsonPrimitive).content })
             })
@@ -140,6 +142,7 @@ class DeviceSetupGuide(
         // Our own label ("Bekon Agent"), never a hardcoded "Bekon": other pro.* Bekon apps may be installed.
         val label = try { ctx.packageManager.getApplicationLabel(ctx.applicationInfo).toString() } catch (_: Exception) { "Bekon Agent" }
         val tried = mutableListOf<String>()
+        val background = !pro.potoki.bekon.agent.status.AgentAlert.inForeground()
         for (e in st["intents"]?.jsonArray ?: JsonArray(emptyList())) {
             val o = e.jsonObject
             val i = if (o.s("bekon") == "projection") {
@@ -156,15 +159,36 @@ class DeviceSetupGuide(
             // activity is brought to front under a stale stack (Other permissions instead of Autostart).
             if (o.s("bekon") != "projection") i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
             val what = o.s("component").ifEmpty { o.s("action").ifEmpty { "launcher" } }
+            if (background) {
+                // Android blocks background activity starts silently: hand the user a heads-up to tap instead.
+                if (o.s("bekon") != "projection" && i.resolveActivity(ctx.packageManager) == null) {
+                    tried += "$what: not resolvable"; continue
+                }
+                pro.potoki.bekon.agent.status.AgentAlert.lastSetupIntent = i
+                pro.potoki.bekon.agent.status.AgentAlert.post(
+                    ctx, ctx.getString(pro.potoki.bekon.agent.R.string.setup_tap_to_open, st.loc("title")),
+                    ctx.getString(pro.potoki.bekon.agent.R.string.setup_tap_body) + "\n" + st.loc("path"), i,
+                )
+                return "$BLOCKED: user must tap notification '${ctx.getString(pro.potoki.bekon.agent.R.string.setup_tap_to_open, st.loc("title"))}' (target $what). " +
+                    "Bekon is in the background, so Android does not allow opening the screen directly. Ask the human to tap the notification, then wait_for_change."
+            }
             try {
+                pro.potoki.bekon.agent.status.AgentAlert.lastSetupIntent = i
                 ctx.startActivity(i)
                 val ex = i.extras?.keySet()?.joinToString { k -> "$k=${i.extras?.get(k)}" }
                 return "opened $what${if (ex.isNullOrEmpty()) "" else " [$ex]"} for $pkg (after ${tried.size} fallback(s))"
             }
             catch (ex: Exception) { tried += "$what: ${ex.javaClass.simpleName}" }
         }
-        throw IllegalStateException("no screen opened for $stepId. tried: ${tried.joinToString("; ")}. Guide the user manually: ${st["path"]}")
+        throw IllegalStateException("no screen opened for $stepId. tried: ${tried.joinToString("; ")}. Guide the user manually: ${st.loc("path")}")
     }
+
+    /** Device language for step texts: ru or en. */
+    private fun lang(): String = if (java.util.Locale.getDefault().language == "ru") "ru" else "en"
+    private fun JsonObject.loc(k: String): String =
+        (this[k] as? JsonObject)?.let { o -> o.s(lang()).ifEmpty { o.s("en") } } ?: s(k)
+
+    companion object { const val BLOCKED = "blocked_background" }
 
     private fun JsonObject.s(k: String) = (this[k] as? JsonPrimitive)?.content ?: ""
 }

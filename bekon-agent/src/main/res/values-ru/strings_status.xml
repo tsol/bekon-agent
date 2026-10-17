@@ -9,12 +9,19 @@
     <string name="notif_stop_disconnect">Остановить и отключить</string>
 
     <string name="access_title">Новый агент запрашивает доступ</string>
-    <string name="access_message">Агент с адреса %1$s хочет управлять этим телефоном.\n\nId: %2$s</string>
-    <string name="access_note_text">Агент с адреса %1$s хочет управлять телефоном</string>
+    <string name="access_message">Агент «%1$s» просит доступ к телефону (адрес %2$s). Разрешить ему видеть экран и управлять?</string>
+    <string name="access_note_text">Агент «%1$s» просит доступ к телефону (адрес %2$s). Нажмите «Разрешить» или «Отклонить».</string>
     <string name="access_allow">Разрешить</string>
-    <string name="access_deny">Запретить</string>
+    <string name="access_deny">Отклонить</string>
     <string name="agent_connected_one">Агент «%1$s» подключён — ждите его инструкций</string>
     <string name="agents_connected_title">Подключённые агенты</string>
     <string name="agent_waiting">Ждём подключения агента — покажите ему QR-код</string>
     <string name="show_qr_again">Показать QR снова</string>
+    <string name="access_note_title">Агент «%1$s» просит доступ к телефону</string>
+    <string name="access_channel">Запросы доступа агентов</string>
+    <string name="alert_channel">Агенту нужны вы</string>
+    <string name="alert_agent_unknown">Агент</string>
+    <string name="alert_status_body">%1$s · %2$s\n%3$s</string>
+    <string name="setup_tap_to_open">Нажмите, чтобы открыть: %1$s</string>
+    <string name="setup_tap_body">Агент просит открыть этот экран настроек. Android не дал открыть его автоматически.</string>
 </resources>

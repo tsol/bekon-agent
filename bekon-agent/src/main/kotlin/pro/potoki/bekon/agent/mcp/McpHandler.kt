@@ -525,13 +525,19 @@ class McpHandler(
                 args.strOr("text"), args.strOr("state"), args.intOr("ttlMs")?.toLong(), args.boolOr("clear"))
             val st = pro.potoki.bekon.agent.status.AgentStatus.apply(req)
             val overlay = pro.potoki.bekon.agent.device.touch.GestureOverlay.canShowStatus()
+            val ctx = pro.potoki.bekon.agent.BekonApp.appContext
+            if (ctx != null) {
+                if (st == null) pro.potoki.bekon.agent.status.AgentAlert.clear(ctx)
+                else if (!overlay) pro.potoki.bekon.agent.status.AgentAlert.status(
+                    ctx, st, pro.potoki.bekon.agent.access.AgentConnections.connected.value.lastOrNull())
+            }
             buildJsonObject {
                 put("ok", true)
                 put("shown", when {
                     st == null -> "cleared"
                     overlay && st.state == pro.potoki.bekon.agent.status.AgentStatus.State.DONE -> "overlay+notification"
                     overlay -> "overlay"
-                    else -> "notification"
+                    else -> "notification-only"
                 })
                 put("deviceInfo", deviceInfoJson())
                 put("text", when {
@@ -539,7 +545,7 @@ class McpHandler(
                     overlay -> "status '${st.text}' (${st.state.wire}) shown on the phone in the overlay pill" +
                         (if (st.state == pro.potoki.bekon.agent.status.AgentStatus.State.DONE) " and the session notification ('Agent finished')" else "") +
                         (if (st.ttlMs > 0) ", auto-clears in ${st.ttlMs} ms" else ", stays until replaced/cleared or the session stops")
-                    else -> "Accessibility (Gestures) overlay is OFF, so the status '${st.text}' (${st.state.wire}) was shown in the ongoing session notification text instead"
+                    else -> "Accessibility (Gestures) overlay is OFF, so the status '${st.text}' (${st.state.wire}) was shown notification-only: a heads-up 'Agent needs you' notification plus the session notification (the human sees it only if they look at notifications)"
                 } + (if (req.truncated) ". Text was truncated to ${pro.potoki.bekon.agent.status.AgentStatus.MAX_CHARS} chars; keep it under ~60." else "") +
                     ". Device language: ${pro.potoki.bekon.agent.status.AgentStatus.language()} — write status text in the human's language.")
             }
@@ -555,7 +561,10 @@ class McpHandler(
         "device_setup_guide" -> (setup ?: throw CapabilityException("setup guide: not available")).guide()
         "open_setup_screen" -> {
             val g = setup ?: throw CapabilityException("setup guide: not available")
-            buildJsonObject { put("ok", true); val opened = g.open(args.str("step"))
+            buildJsonObject { val opened = g.open(args.str("step"))
+            val blocked = opened.startsWith(pro.potoki.bekon.agent.setup.DeviceSetupGuide.BLOCKED)
+            put("ok", !blocked)
+            put("result", if (blocked) "blocked_background: user must tap notification" else "opened")
             val next = if (executor.health()["touch"] == false)
                 ". Accessibility is OFF: you cannot snapshot, tap, scroll or draw on the phone. Next: screenshot, annotate_screenshot the control and show it to the human, then wait_for_change (pixel mode) and screenshot again. The human scrolls and taps."
             else ". Next: coach_script (rules follow scrolling) or snapshot -> coach_draw -> wait_for_change and read the diff. Never wait for a chat reply during setup."
