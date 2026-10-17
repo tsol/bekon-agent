@@ -204,11 +204,13 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
     val hNotif = stringResource(R.string.core_hint_notifications)
     val hRestr = stringResource(R.string.core_hint_restricted)
     val hA11y = stringResource(R.string.core_hint_a11y, section)
+    val guided = current == CoreStep.A11Y || current == CoreStep.RESTRICTED
     Card(Modifier.fillMaxWidth(), shape = CARD_SHAPE) {
-        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        // Guided steps are compact so card + guide + button fit one screen above the bottom bar.
+        Column(Modifier.padding(if (guided) 18.dp else 24.dp), verticalArrangement = Arrangement.spacedBy(if (guided) 10.dp else 16.dp)) {
             Text(stringResource(coreTitle(current)), style = MaterialTheme.typography.titleMedium)
             val captureLost = current == CoreStep.SESSION && state.isRunning && !state.captureGranted
-            Text(if (captureLost) stringResource(R.string.capture_lost_body) else stringResource(coreSentence(current), section),
+            if (!guided) Text(if (captureLost) stringResource(R.string.capture_lost_body) else stringResource(coreSentence(current), section),
                 style = MaterialTheme.typography.bodyLarge)
             val busy = current == CoreStep.SESSION && (state.phase == SessionPhase.STARTING || (state.isRunning && state.captureGranted))
             val verb = if (captureLost) R.string.capture_lost_verb else coreVerb(current, state)
@@ -216,7 +218,7 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
             if (current == CoreStep.A11Y || current == CoreStep.RESTRICTED) {
                 val g = remember { DeviceSetupGuide(ctx, projectionActive = { state.captureGranted }) }
                 val oem = remember { guideOem(g) }
-                IllustratedGuide(if (current == CoreStep.RESTRICTED) restrictedSteps() else a11ySteps(oem))
+                IllustratedGuide(if (current == CoreStep.RESTRICTED) restrictedSteps(oem) else a11ySteps(oem))
             }
             val btn = if (current == CoreStep.A11Y || current == CoreStep.RESTRICTED) R.string.g_open_settings else verb
             if (busy) Row(verticalAlignment = Alignment.CenterVertically) {

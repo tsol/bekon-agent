@@ -229,8 +229,10 @@ fun BekonHome(state: HomeState, tick: Int = 0, onIntent: (HomeIntent) -> Unit) {
 
         }
         val ctx = androidx.compose.ui.platform.LocalContext.current
-        // Pinned to the bottom, just above the bottom bar; small and muted. Stacked so long Russian labels never wrap.
-        Column(
+        // Pinned to the bottom, just above the bottom bar; small and muted. Hidden while a setup step is shown
+        // (the same links are in Settings), so the step card never slides under them.
+        val setupDone = state.isRunning && state.captureGranted && (state.gesturesOn || TouchService.isBound())
+        if (setupDone) Column(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
