@@ -59,6 +59,11 @@ class PillMenuActivity : Activity() {
         setContentView(col)
     }
 
+    override fun onResume() { super.onResume(); open = true; pro.potoki.bekon.agent.device.touch.StatusPill.refresh() }
+    override fun onPause() { super.onPause(); open = false; pro.potoki.bekon.agent.device.touch.StatusPill.refresh() }
+
+    companion object { @Volatile var open = false }
+
     private fun clearHints() {
         try { UserEvents.stopCoaching?.invoke() } catch (_: Exception) {}
         try { pro.potoki.bekon.agent.coach.CoachOverlay.clear() } catch (_: Exception) {}

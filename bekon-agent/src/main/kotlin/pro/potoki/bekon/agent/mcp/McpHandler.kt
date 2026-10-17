@@ -142,7 +142,7 @@ class McpHandler(
             else {
                 val items = cur ?: executor.snapshot().items.also { cur = it }
                 val sel = pro.potoki.bekon.agent.coach.CoachScript.Sel(at, ac)
-                pro.potoki.bekon.agent.coach.CoachScript.preferClickable(items.filter { it.bounds != null && sel.matches(it) && it.pkg != pro.potoki.bekon.agent.coach.CoachScript.OWN_PKG }, items)
+                pro.potoki.bekon.agent.coach.CoachScript.preferClickable(items.filter { it.bounds != null && sel.matches(it) }, items)
                     ?: throw IllegalArgumentException("shapes[$i]: no node matches anchor '${at ?: ac}' on the current screen")
             }
             val b = node.bounds ?: throw IllegalArgumentException("shapes[$i]: anchor node has no bounds")
@@ -223,7 +223,7 @@ class McpHandler(
             "initialize" -> respondJson(call, JsonRpcResponse(id = id, result = buildJsonObject {
                 put("protocolVersion", "2025-03-26")
                 put("capabilities", buildJsonObject { put("tools", JsonObject(emptyMap())) })
-                put("serverInfo", buildJsonObject { put("name", "bekon-agent"); put("version", "0.1") })
+                put("serverInfo", buildJsonObject { put("name", "bekon-agent"); put("version", pro.potoki.bekon.agent.BuildConfig.VERSION_NAME) })
                 put("instructions", pro.potoki.bekon.agent.handoff.AgentGuide.SERVER_INSTRUCTIONS)
                 put("deviceInfo", deviceInfoJson())
             }))

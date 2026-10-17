@@ -66,6 +66,8 @@ object AgentStatus {
 
     /** "Нужны вы: нажмите Разрешить" -> "нажмите Разрешить" (only when something follows the label). */
     fun stripLabel(text: String, state: State): String {
+        // done shows the text alone (no label), so 'Готово — …' is the agent's own wording: keep it.
+        if (state == State.DONE) return text
         for (l in LABELS[state].orEmpty().sortedByDescending { it.length }) {
             val m = Regex("^" + Regex.escape(l) + "\\s*[:—–\\-!.]+\\s*(.+)$", setOf(RegexOption.IGNORE_CASE)).find(text)
             if (m != null) return m.groupValues[1].replaceFirstChar { it.uppercase() }

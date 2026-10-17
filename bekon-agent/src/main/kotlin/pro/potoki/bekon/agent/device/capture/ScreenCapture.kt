@@ -121,6 +121,14 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
     /** Copy of the latest full-resolution frame (caller owns it), or null. */
     fun latestBitmap(): Bitmap? {
         if (mediaProjection == null) return null
+        // Static screens produce no frames, so the cache may be old. If it is, give the virtual
+        // display a moment to deliver a frame for the current screen (a change just happened, e.g.
+        // a tap or a new window) before falling back to the cached one.
+        val asked = System.currentTimeMillis()
+        if (lastFrame != null && asked - lastFrameAt > 150) {
+            val until = asked + 450
+            while (System.currentTimeMillis() < until && lastFrameAt < asked) Thread.sleep(25)
+        }
         val deadline = System.currentTimeMillis() + TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
             val needFresh = System.currentTimeMillis() < skipBlackUntil

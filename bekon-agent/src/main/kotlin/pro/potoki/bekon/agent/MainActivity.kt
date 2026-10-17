@@ -226,9 +226,10 @@ fun BekonHome(state: HomeState, tick: Int = 0, onIntent: (HomeIntent) -> Unit) {
             if (state.phase == SessionPhase.FAILED) SetupCard(state, onIntent)
 
             val ctx = androidx.compose.ui.platform.LocalContext.current
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                TextButton(onClick = { Consent.showDisclosure(ctx, Consent.Kind.A11Y) }) { Text(stringResource(R.string.home_a11y_disclosure)) }
-                TextButton(onClick = { Consent.openPrivacyPolicy(ctx) }) { Text(stringResource(R.string.home_privacy)) }
+            // Stacked: side by side the long Russian labels wrapped mid-word.
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                TextButton(onClick = { Consent.showDisclosure(ctx, Consent.Kind.A11Y) }) { Text(stringResource(R.string.home_a11y_disclosure), maxLines = 1, softWrap = false) }
+                TextButton(onClick = { Consent.openPrivacyPolicy(ctx) }) { Text(stringResource(R.string.home_privacy), maxLines = 1, softWrap = false) }
             }
         }
     }

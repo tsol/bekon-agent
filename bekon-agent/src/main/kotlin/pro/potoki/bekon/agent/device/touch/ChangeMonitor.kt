@@ -30,7 +30,8 @@ object ChangeMonitor : ChangeSignal {
         if (t and RELEVANT == 0) return
         val pkg = e.packageName?.toString() ?: ""
         val cls = e.className?.toString() ?: ""
-        if (t == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg.isNotEmpty() && pkg != "com.android.systemui" &&
+        // Bekon's own dialogs (pill menu, access prompt) float over the app: keep reporting the app underneath.
+        if (t == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg.isNotEmpty() && pkg != "com.android.systemui" && pkg != ownPkg &&
             (cls.contains("Activity") || cls.contains("Launcher"))) { fgPkg = pkg; fgCls = cls }
         // SystemUI content/windows churn = clock, signal and notification icons.
         if (pkg == "com.android.systemui" && t != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
@@ -52,7 +53,7 @@ object ChangeMonitor : ChangeSignal {
         val root = try { svc?.rootInActiveWindow } catch (_: Exception) { null }
         // Root can be null (or our own overlay) mid-transition: fall back to the active app window, then the last event.
         val own = svc?.packageName
-        val pkg = root?.packageName?.toString()?.takeIf { it != own }
+        val pkg = root?.packageName?.toString()?.takeIf { it != own || !pro.potoki.bekon.agent.status.PillMenuActivity.open }
             ?: try {
                 svc?.windows?.firstOrNull { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION && it.isActive }
                     ?.root?.packageName?.toString()

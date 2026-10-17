@@ -51,7 +51,11 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
             val b = o.optJSONArray("bounds")
             if (b == null || b.length() != 4) continue
             val l = b.getInt(0); val t = b.getInt(1); val r = b.getInt(2); val bot = b.getInt(3)
-            if (r - l <= 0 || bot - t <= 0) continue
+            // Compare, don't subtract: offscreen nodes report [MAX,MAX,MIN,MIN] and MIN-MAX overflows to a positive width.
+            if (r <= l || bot <= t) continue
+            val scrMax = maxOf(screenSize.first, screenSize.second) // rotation-safe
+            if (r <= 0 || bot <= 0 || l >= scrMax || t >= scrMax) continue
+            if (o.has("visible") && !o.optBoolean("visible", true)) continue
             val text = o.optString("text").trim().ifEmpty { null }
             val desc = o.optString("desc").trim().ifEmpty { null }
             val clickable = o.optBoolean("clickable", false)

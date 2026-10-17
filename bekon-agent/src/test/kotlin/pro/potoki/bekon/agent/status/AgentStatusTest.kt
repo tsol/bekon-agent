@@ -71,4 +71,8 @@ class AgentStatusTest {
         assertEquals(2, r.step); assertEquals(4, r.total)
         assertEquals(null, AgentStatus.parse("x", "working", null, null, null, 5, 4).step)
     }
+
+    @Test fun doneTextIsNotRewritten() {
+        assertEquals("Готово — можно остановить доступ", AgentStatus.parse("Готово — можно остановить доступ", "done", null, null).text)
+    }
 }

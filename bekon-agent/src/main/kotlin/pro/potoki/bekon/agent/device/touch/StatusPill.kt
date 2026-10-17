@@ -73,6 +73,7 @@ object StatusPill {
     private fun shouldShow(): Boolean {
         val s = pro.potoki.bekon.agent.session.SessionService.state.value
         if (!s.isRunning || s.overlaysMustClear) return false
+        if (pro.potoki.bekon.agent.status.PillMenuActivity.open) return false
         return AgentStatus.current.value != null || pro.potoki.bekon.agent.access.AgentConnections.connected.value.isNotEmpty()
     }
 
@@ -154,8 +155,7 @@ object StatusPill {
         if (host == null) return
         val d = v.resources.displayMetrics.density
         val sc = screen()
-        val w = v.measuredWidth.takeIf { it > 0 } ?: v.measureNow().first
-        val h = v.measuredHeight.takeIf { it > 0 } ?: v.measureNow().second
+        val (w, h) = v.measureNow()
         val (nx, ny) = if (dismissed) {
             (sc.right - w) to (sc.top + (sc.height() * 0.45f).toInt())
         } else {
@@ -175,6 +175,13 @@ object StatusPill {
                     (if (hits(x, y)) 10_000 else 0) + cl.count { Rect.intersects(it, r) } * 10 + cands.indexOf(x to y)
                 }
             }
+        }
+        val cx2 = if (dismissed) nx else nx.coerceIn(0, (v.resources.displayMetrics.widthPixels - w).coerceAtLeast(0))
+        val cy2 = ny.coerceIn(0, (v.resources.displayMetrics.heightPixels - h).coerceAtLeast(0))
+        if (p.x != cx2 || p.y != cy2) {
+            p.x = cx2; p.y = cy2
+            try { wm?.updateViewLayout(v, p) } catch (_: Exception) {}
+            return
         }
         if (p.x != nx || p.y != ny) {
             p.x = nx; p.y = ny
@@ -222,11 +229,20 @@ object StatusPill {
             requestLayout(); invalidate()
         }
 
+        private var layout1: android.text.StaticLayout? = null
+
+        /** Up to 92% of the screen width; line 1 wraps to 3 lines, line 2 stays one line. */
         fun measureNow(): Pair<Int, Int> {
             if (tab) return (22 * d).toInt() to (64 * d).toInt()
-            val maxW = resources.displayMetrics.widthPixels - 40 * d
-            val tw = maxOf(t1.measureText(line1), t2.measureText(line2)).coerceAtMost(maxW - 2 * pad)
-            return (tw + 2 * pad).toInt() to (42 * d).toInt()
+            val maxText = (resources.displayMetrics.widthPixels * 0.92f - 2 * pad).toInt().coerceAtLeast((80 * d).toInt())
+            val want = maxOf(t1.measureText(line1), t2.measureText(line2)).toInt() + 1
+            val tw = want.coerceAtMost(maxText)
+            val tp = android.text.TextPaint(t1)
+            layout1 = android.text.StaticLayout.Builder.obtain(line1, 0, line1.length, tp, tw)
+                .setMaxLines(3).setEllipsize(android.text.TextUtils.TruncateAt.END).setIncludePad(false).build()
+            val h1 = layout1!!.height
+            val h = (8 * d + h1 + 4 * d + t2.textSize + 10 * d).toInt()
+            return (tw + 2 * pad).toInt() to h
         }
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -240,12 +256,14 @@ object StatusPill {
                 canvas.drawText("‹", r.centerX() - t1.measureText("‹") / 2, r.centerY() + 5 * d, t1)
                 return
             }
-            canvas.drawRoundRect(r, height / 2f, height / 2f, bg)
-            canvas.drawRoundRect(r, height / 2f, height / 2f, edge)
+            val rad = minOf(height / 2f, 21f * d)
+            canvas.drawRoundRect(r, rad, rad, bg)
+            canvas.drawRoundRect(r, rad, rad, edge)
             val avail = width - 2 * pad
-            fun fit(t: String, p: Paint) = android.text.TextUtils.ellipsize(t, android.text.TextPaint(p), avail, android.text.TextUtils.TruncateAt.END).toString()
-            canvas.drawText(fit(line1, t1), pad, 18f * d, t1)
-            canvas.drawText(fit(line2, t2), pad, 33f * d, t2)
+            val l1 = layout1 ?: run { measureNow(); layout1!! }
+            canvas.save(); canvas.translate(pad, 8f * d); l1.draw(canvas); canvas.restore()
+            val sub = android.text.TextUtils.ellipsize(line2, android.text.TextPaint(t2), avail, android.text.TextUtils.TruncateAt.END).toString()
+            canvas.drawText(sub, pad, 8f * d + l1.height + 4f * d + t2.textSize * 0.85f, t2)
         }
 
         private var downX = 0f; private var downY = 0f; private var startX = 0; private var startY = 0
@@ -281,7 +299,14 @@ object StatusPill {
                         Math.abs(vx) > 2500 * d / 2.6f || p.x + width * 0.35f < 0 || p.x + width * 0.65f > sw -> {
                             dismissed = true; update(st, caps ?: Capabilities.current(), true); relayoutNow()
                         }
-                        else -> manual = p.x to p.y
+                        else -> {
+                            // Keep a dragged pill fully on screen (fling-off is handled above).
+                            val sh = resources.displayMetrics.heightPixels
+                            p.x = p.x.coerceIn(0, (sw - width).coerceAtLeast(0))
+                            p.y = p.y.coerceIn(0, (sh - height).coerceAtLeast(0))
+                            try { wm?.updateViewLayout(this, p) } catch (_: Exception) {}
+                            manual = p.x to p.y
+                        }
                     }
                     dragging = false
                 }
