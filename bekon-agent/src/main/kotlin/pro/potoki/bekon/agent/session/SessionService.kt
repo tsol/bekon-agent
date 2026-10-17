@@ -241,6 +241,7 @@ class SessionService : Service() {
     }
 
     private fun stopSession() {
+        pro.potoki.bekon.agent.access.AgentConnections.clear()
         Log.i(TAG, "stopSession")
         supervisor?.stop()
         supervisor = null

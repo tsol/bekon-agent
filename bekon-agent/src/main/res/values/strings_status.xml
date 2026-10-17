@@ -7,4 +7,14 @@
     <string name="notif_session_title">Bekon remote session active</string>
     <string name="notif_agent_finished">Agent finished</string>
     <string name="notif_stop_disconnect">Stop &amp; disconnect</string>
+
+    <string name="access_title">New agent wants access</string>
+    <string name="access_message">An agent at %1$s wants to use this phone.\n\nId: %2$s</string>
+    <string name="access_note_text">Agent at %1$s wants to use this phone</string>
+    <string name="access_allow">Allow</string>
+    <string name="access_deny">Deny</string>
+    <string name="agent_connected_one">Agent «%1$s» is connected — wait for its instructions</string>
+    <string name="agents_connected_title">Connected agents</string>
+    <string name="agent_waiting">Waiting for an agent to connect — show it the QR code</string>
+    <string name="show_qr_again">Show QR again</string>
 </resources>

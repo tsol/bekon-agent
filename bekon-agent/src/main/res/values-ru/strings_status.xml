@@ -7,4 +7,14 @@
     <string name="notif_session_title">Удалённый сеанс Bekon активен</string>
     <string name="notif_agent_finished">Агент закончил</string>
     <string name="notif_stop_disconnect">Остановить и отключить</string>
+
+    <string name="access_title">Новый агент запрашивает доступ</string>
+    <string name="access_message">Агент с адреса %1$s хочет управлять этим телефоном.\n\nId: %2$s</string>
+    <string name="access_note_text">Агент с адреса %1$s хочет управлять телефоном</string>
+    <string name="access_allow">Разрешить</string>
+    <string name="access_deny">Запретить</string>
+    <string name="agent_connected_one">Агент «%1$s» подключён — ждите его инструкций</string>
+    <string name="agents_connected_title">Подключённые агенты</string>
+    <string name="agent_waiting">Ждём подключения агента — покажите ему QR-код</string>
+    <string name="show_qr_again">Показать QR снова</string>
 </resources>

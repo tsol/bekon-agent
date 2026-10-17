@@ -10,18 +10,22 @@ class ClientGate(
     private val paused: () -> Boolean,
     private val ask: (clientId: String, ip: String) -> Boolean,
 ) {
-    @Synchronized
+    // Only the cheap checks are locked. The blocking ask() runs outside the lock so a second
+    // request from the same id joins the pending decision instead of queueing a new prompt behind it.
     fun rejection(clientId: String?, ip: String): String? {
         if (paused()) return PAUSED
         val id = clientId?.trim()?.takeIf { it.isNotEmpty() } ?: return MISSING_ID
-        if (id in clients.trusted()) return null
-        val first = clients.trusted().isEmpty()
-        if (first && clients.autoAcceptNext()) {
-            clients.remember(id)
-            return null
+        val known = synchronized(this) {
+            when {
+                id in clients.trusted() -> true
+                clients.trusted().isEmpty() && clients.autoAcceptNext() -> { clients.remember(id); true }
+                else -> false
+            }
         }
+        if (known) { AgentConnections.mark(id); return null }
         if (ask(id, ip)) {
-            clients.remember(id)
+            synchronized(this) { clients.remember(id) }
+            AgentConnections.mark(id)
             return null
         }
         return DENIED

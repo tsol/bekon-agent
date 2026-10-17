@@ -194,6 +194,9 @@ class MainActivity : ComponentActivity() {
 fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
     var showQr by remember { mutableStateOf(false) }
     var showShortcuts by remember { mutableStateOf(false) }
+    val agents by pro.potoki.bekon.agent.access.AgentConnections.connected.collectAsState()
+    // An agent just got in: the QR has done its job, so close it and show the status instead.
+    androidx.compose.runtime.LaunchedEffect(agents.size) { if (agents.isNotEmpty()) showQr = false }
     Scaffold(
         bottomBar = { HomeFooter(state, onIntent) },
     ) { pad ->
@@ -231,6 +234,7 @@ fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
                     }
                 }
             }
+            if (state.isRunning) AgentsCard(agents, state.canShowQr) { showQr = true }
             Card(Modifier.padding(vertical = 8.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatusRow("Screen", pill(state.captureGranted), dimmed = state.paused) { onIntent(HomeIntent.OpenSettingsScreen(SettingsRow.SCREEN)) }
@@ -266,7 +270,7 @@ fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
                         modifier = Modifier.weight(1f).height(52.dp),
                     ) { Text("Start") }
                 }
-                OutlinedButton(
+                if (agents.isEmpty()) OutlinedButton(
                     onClick = { showQr = true },
                     enabled = state.canShowQr,
                     modifier = Modifier.weight(1f).height(52.dp),
@@ -297,6 +301,27 @@ fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
     }
     if (showShortcuts) {
         ShortcutsScreen(onBack = { showShortcuts = false })
+    }
+}
+
+@Composable
+private fun AgentsCard(agents: List<String>, canShowQr: Boolean, onShowQr: () -> Unit) {
+    Card {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (agents.isEmpty()) {
+                Text(androidx.compose.ui.res.stringResource(R.string.agent_waiting), style = MaterialTheme.typography.bodyMedium)
+            } else {
+                Text(
+                    androidx.compose.ui.res.stringResource(R.string.agent_connected_one, agents.last()),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                if (agents.size > 1) {
+                    Text(androidx.compose.ui.res.stringResource(R.string.agents_connected_title), style = MaterialTheme.typography.labelLarge)
+                    agents.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+                }
+                if (canShowQr) TextButton(onClick = onShowQr) { Text(androidx.compose.ui.res.stringResource(R.string.show_qr_again)) }
+            }
+        }
     }
 }
 
