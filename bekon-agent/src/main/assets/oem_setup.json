@@ -94,8 +94,8 @@
      ]},
     {"id": "samsung", "match": ["samsung"], "rom": "One UI", "dkma": "https://dontkillmyapp.com/samsung",
      "steps": [
-      {"id": "samsung_sleeping", "req": "battery", "title": {"en": "Remove from Sleeping/Deep sleeping apps; add to Never sleeping", "ru": "Убрать из спящих/глубоко спящих, добавить в «Никогда не спящие»"},
-       "path": {"en": "Settings > Battery (and device care) > Battery > Background usage limits > Never sleeping apps > add Bekon; also Apps > Bekon > Battery > Unrestricted", "ru": "Настройки > Обслуживание устройства > Батарея > Ограничения фонового использования > Неспящие приложения > добавить Bekon; также Приложения > Bekon > Батарея > Без ограничений"},
+      {"id": "samsung_sleeping", "req": "never_sleeping", "title": {"en": "Remove from Sleeping/Deep sleeping apps; add to Never sleeping", "ru": "Убрать из спящих/глубоко спящих, добавить в «Никогда не спящие»"},
+       "path": {"en": "One UI 8.5: Settings > Battery > Background usage limits > Never auto sleeping apps > «Add apps» icon > Bekon. Older One UI: Settings > Battery (and device care) > Battery > Background usage limits > Never sleeping apps > add Bekon; also Apps > Bekon > Battery > Unrestricted", "ru": "One UI 8.5: Настройки > Батарея > Ограничения в фоновом режиме > Не уходят в сон автоматически > значок «Добавление приложений» > Bekon. Старые версии One UI: Настройки > Обслуживание устройства > Батарея > Ограничения фонового использования > Неспящие приложения > добавить Bekon; также Приложения > Bekon > Батарея > Без ограничений"},
        "intents": [{"component": "com.samsung.android.lool/com.samsung.android.sm.battery.ui.BatteryActivity"},
                    {"component": "com.samsung.android.lool/com.samsung.android.sm.ui.battery.BatteryActivity"},
                    {"action": "android.settings.APPLICATION_DETAILS_SETTINGS", "data": "package:{pkg}"}]},

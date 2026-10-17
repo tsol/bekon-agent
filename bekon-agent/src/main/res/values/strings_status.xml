@@ -40,4 +40,7 @@
     <string name="pill_send">Send to agent</string>
     <string name="pill_cancel_all">Cancel everything</string>
     <string name="pill_also_stop">Also stop the session</string>
+    <string name="access_replace_title">Replace the agent?</string>
+    <string name="access_replace_message">Replace agent «%1$s» with «%2$s»? Only one agent can be connected at a time.</string>
+    <string name="notif_ready_title">Bekon is ready for your agent</string>
 </resources>

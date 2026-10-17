@@ -72,9 +72,9 @@ class DeviceSetupGuide(
     }
 
     /** Optional: nice-to-have for long sessions, never needed to connect; never opened automatically. */
-    fun isOptional(step: JsonObject): Boolean = step.s("req") == "battery"
+    fun isOptional(step: JsonObject): Boolean = step.s("req") in setOf("battery", "never_sleeping")
 
-    /** true/false when detectable, null when unknown. */
+    /** true/false when detectable, null when unknown ("never_sleeping" has no public API: always unknown, never reuses the battery check). */
     fun status(req: String): Boolean? = when (req) {
         "accessibility" -> (Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: "")
             .split(':').any { it.startsWith(ctx.packageName + "/") }

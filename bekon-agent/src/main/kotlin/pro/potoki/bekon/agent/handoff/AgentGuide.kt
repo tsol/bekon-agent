@@ -53,7 +53,24 @@ curl -s $mcp -H 'Content-Type: application/json' -H '$hdr: my-agent-1' \
 ## Core tools
 agent_status, snapshot (UI tree with refs + a baseline token), screenshot, annotate_screenshot, tap, swipe, type, key, nav,
 wait_for_change, coach_draw, coach_clear, coach_script, wait_for_script, coach_script_stop, scan_list,
-shortcuts, shortcut_open, device_setup_guide, open_setup_screen, connection_info.
+shortcuts, shortcut_open, shortcut_add, shortcut_remove, open_url (https, no shortcut saved), clipboard,
+device_setup_guide, open_setup_screen, connection_info, user_events.
+
+## Icon-only controls
+- Many buttons have no text (search, ⋮, +, back arrows). Their name in snapshot is the contentDescription;
+  match them by that name in coach_script / coach_draw anchorText, or use the snapshot ref. If a node has no
+  name at all, use its bounds from the CURRENT snapshot (never guess positions).
+
+## One agent at a time
+- Only one agent can be connected. A second client id must be approved by the owner as a replacement; the
+  replaced agent gets "replaced by another agent" until the session restarts.
+
+## The human can talk back (status pill menu)
+- Tapping the status pill opens: Back to Bekon / I changed my mind / Change the goal / Cancel everything.
+- These arrive as userEvents in wait_for_change / wait_for_script (they return early) and via `user_events`:
+  back_to_app, changed_mind (hints were cleared: don't redraw the same hint), new_goal {text} (follow it),
+  cancel_all (stop; session paused or stopped).
+- The pill can be dragged or swiped away by the human; it never covers your coach marks.
 
 ## Coaching loop (helping a human do it themselves)
 1. `snapshot` -> keep its baseline token.

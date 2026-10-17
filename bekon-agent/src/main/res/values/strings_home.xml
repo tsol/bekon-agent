@@ -74,4 +74,18 @@
     <string name="core_icon_notifications" translatable="false">🔔</string>
     <string name="core_icon_restricted" translatable="false">🔓</string>
     <string name="core_icon_a11y" translatable="false">👆</string>
+    <string name="conn_not_ready">The agent can\'t connect yet</string>
+    <string name="conn_ready">The agent can connect</string>
+    <string name="conn_disconnected">Agent not connected</string>
+    <string name="conn_connected">Connected: %1$s</string>
+    <string name="conn_connected_body">The agent sees the screen and can act on this phone. You can stop at any time.</string>
+    <string name="conn_missing">Missing: %1$s</string>
+    <string name="step1_session">Bekon will ask to share the screen and create a private link.</string>
+    <string name="step1_notifications">Bekon shows the agent\'s requests in notifications.</string>
+    <string name="step1_restricted">In App info tap ⋮ → Allow restricted settings, then come back.</string>
+    <string name="step1_a11y">Find %1$s → Bekon Gestures and turn it on.</string>
+    <string name="verb_start">Start</string>
+    <string name="verb_enable">Turn on</string>
+    <string name="verb_open">Open</string>
+    <string name="verb_i_did">I did it</string>
 </resources>

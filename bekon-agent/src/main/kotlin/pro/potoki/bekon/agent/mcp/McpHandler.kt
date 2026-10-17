@@ -5,6 +5,7 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receiveText
 import io.ktor.server.request.httpMethod
 import io.ktor.server.response.respondText
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
@@ -59,6 +60,7 @@ class McpHandler(
             "Keep the human informed on the phone with agent_status (a small pill inside the bacon frame; touches pass through): " +
                 "call agent_status state=working with a short text when you start a task, state=waiting when the human must act (e.g. 'Нажмите «Разрешить»'; the pill already shows the state label, so do NOT prefix the text with 'Нужны вы:'/'Working:' etc.), optional step/total to show 'шаг 2 из 4', " +
                 "state=error if you are stuck, and state=done with a one-line summary when finished (e.g. 'Готово — можно остановить доступ'). " +
+                "Only one agent may be connected at a time. The human can answer from the pill menu: watch userEvents in wait_for_change/wait_for_script results (or call user_events). " +
                 "The pill also shows live capabilities (sees screen / can tap / paused), also returned as capabilities in agent_status and connection_info: trust them, not assumptions. " +
                 "Write the text in the HUMAN's language: use deviceInfo.language from initialize/connection_info/agent_status (device locale, e.g. ru = Russian) unless the human writes to you in another language. Keep it under ~60 characters."
         const val READ_ONLY = "device is in read-only mode so this action was declined."
@@ -114,7 +116,80 @@ class McpHandler(
     private val baselines = object : LinkedHashMap<String, List<pro.potoki.bekon.agent.core.UiNode>>(16, 0.75f, true) {
         override fun removeEldestEntry(e: MutableMap.MutableEntry<String, List<pro.potoki.bekon.agent.core.UiNode>>?) = size > 16
     }
+    /** Items of the agent's latest snapshot: refs (e12) are resolved against these. */
+    @Volatile private var lastItems: List<pro.potoki.bekon.agent.core.UiNode> = emptyList()
+    private var anchorJob: kotlinx.coroutines.Job? = null
+    private val anchorScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default + kotlinx.coroutines.SupervisorJob())
+
+    private data class Anchor(val index: Int, val label: String, val bounds: IntArray)
+
+    /**
+     * coach_draw shapes may carry ref (from the latest snapshot) or anchorText/anchorContains instead of
+     * coordinates. Resolve them to node bounds (clickable node preferred) and remember the anchors.
+     */
+    private fun resolveAnchors(arr: kotlinx.serialization.json.JsonArray?): Pair<kotlinx.serialization.json.JsonArray?, List<Anchor>> {
+        if (arr == null) return null to emptyList()
+        val anchors = ArrayList<Anchor>()
+        var cur: List<pro.potoki.bekon.agent.core.UiNode>? = null
+        val out = kotlinx.serialization.json.JsonArray(arr.mapIndexed { i, el ->
+            val o = el as? JsonObject ?: return@mapIndexed el
+            val ref = (o["ref"] as? JsonPrimitive)?.content
+            val at = (o["anchorText"] as? JsonPrimitive)?.content
+            val ac = (o["anchorContains"] as? JsonPrimitive)?.content
+            if (ref == null && at == null && ac == null) return@mapIndexed el
+            val node = if (ref != null) lastItems.firstOrNull { it.ref == ref }
+                ?: throw IllegalArgumentException("shapes[$i].ref $ref not in your latest snapshot; snapshot again")
+            else {
+                val items = cur ?: executor.snapshot().items.also { cur = it }
+                val sel = pro.potoki.bekon.agent.coach.CoachScript.Sel(at, ac)
+                pro.potoki.bekon.agent.coach.CoachScript.preferClickable(items.filter { it.bounds != null && sel.matches(it) && it.pkg != pro.potoki.bekon.agent.coach.CoachScript.OWN_PKG }, items)
+                    ?: throw IllegalArgumentException("shapes[$i]: no node matches anchor '${at ?: ac}' on the current screen")
+            }
+            val b = node.bounds ?: throw IllegalArgumentException("shapes[$i]: anchor node has no bounds")
+            anchors += Anchor(i, node.label, b)
+            val hasCoords = listOf("x", "x1", "bounds").any { o.containsKey(it) }
+            if (hasCoords) o else JsonObject(o + ("bounds" to buildJsonArray { b.forEach { add(JsonPrimitive(it)) } }))
+        })
+        return out to anchors
+    }
+
+    private fun shift(s: pro.potoki.bekon.agent.coach.Shape, dx: Float, dy: Float) =
+        s.copy(x1 = s.x1 + dx, y1 = s.y1 + dy, x2 = s.x2 + dx, y2 = s.y2 + dy)
+
+    /** Keep anchored marks on their node while the layout shifts (scroll, re-sort, keyboard). */
+    private fun followAnchors(c: pro.potoki.bekon.agent.coach.CoachSurface, shapes: List<pro.potoki.bekon.agent.coach.Shape>, anchors: List<Anchor>) {
+        anchorJob?.cancel()
+        if (anchors.isEmpty()) return
+        anchorJob = anchorScope.launch {
+            val pos = anchors.associate { it.index to it.bounds.copyOf() }.toMutableMap()
+            var misses = 0
+            val t0 = System.currentTimeMillis()
+            while (System.currentTimeMillis() - t0 < 600_000 && misses < 6) {
+                kotlinx.coroutines.delay(700)
+                val items = try { executor.snapshot().items } catch (_: Exception) { misses++; continue }
+                var moved = false; var lost = false
+                for (a in anchors) {
+                    val p = pos[a.index]!!
+                    val n = items.filter { it.label == a.label && it.bounds != null }
+                        .minByOrNull { Math.abs(it.bounds!![1] - p[1]) + Math.abs(it.bounds[0] - p[0]) }
+                    if (n == null) { lost = true; continue }
+                    if (Math.abs(n.bounds!![1] - p[1]) > 8 || Math.abs(n.bounds[0] - p[0]) > 8) { pos[a.index] = n.bounds.copyOf(); moved = true }
+                }
+                if (lost) { misses++; continue } else misses = 0
+                if (moved) {
+                    val out = shapes.mapIndexed { i, s ->
+                        val a = anchors.firstOrNull { it.index == i } ?: return@mapIndexed s
+                        val p = pos[i]!!
+                        shift(s, (p[0] - a.bounds[0]).toFloat(), (p[1] - a.bounds[1]).toFloat())
+                    }
+                    if (!c.drawOnScreen(out, false, 0)) break
+                }
+            }
+        }
+    }
+
     private fun remember(items: List<pro.potoki.bekon.agent.core.UiNode>): String {
+        lastItems = items
         val t = pro.potoki.bekon.agent.core.ScreenDiff.token(items)
         synchronized(baselines) { baselines[t] = items }
         return t
@@ -472,12 +547,14 @@ class McpHandler(
         }
         "coach_draw" -> {
             val c = coach ?: throw CapabilityException("coach: not available")
-            val shapes = pro.potoki.bekon.agent.coach.Sketch.parse(args["shapes"] as? kotlinx.serialization.json.JsonArray)
+            val (resolved, anchors) = resolveAnchors(args["shapes"] as? kotlinx.serialization.json.JsonArray)
+            val shapes = pro.potoki.bekon.agent.coach.Sketch.parse(resolved)
             val append = (args["append"] as? JsonPrimitive)?.content == "true"
             val ttl = (args.intOr("ttlMs") ?: 0).toLong()
             if (!c.drawOnScreen(shapes, append, ttl)) {
                 throw CapabilityException("overlay: accessibility service (Gestures) is off. Use annotate_screenshot and show the image to the user instead.")
             }
+            if (!append) followAnchors(c, shapes, anchors) else anchorJob?.cancel()
             buildJsonObject { put("ok", true); put("text", "drew ${shapes.size} mark(s) on the phone screen. Now call wait_for_change (pass your last baseline) and read its diff; do not ask the human to say 'done'.") }
         }
         "coach_script" -> {
@@ -513,6 +590,7 @@ class McpHandler(
         "coach_clear" -> {
             val c = coach ?: throw CapabilityException("coach: not available")
             scripts.run?.takeIf { it.status == "running" }?.let { scripts.stop() }
+            anchorJob?.cancel()
             c.clearScreen()
             buildJsonObject { put("ok", true); put("text", "cleared") }
         }
@@ -643,7 +721,7 @@ class McpHandler(
         tool("snapshot", "Accessibility-tree snapshot of the screen (nodes in screen space). Items carry checkable/checked/selected/enabled (switches, radio rows, checkmarks). Returns a baseline token for wait_for_change.", schema())
         tool(
             "wait_for_change",
-            "Block until the phone screen meaningfully changes (new window, tap result, toggle flipped, text changed), wait until the UI is quiet for debounceMs, then return. Ignores Bekon's own overlay and status-bar clock/icons. Returns changed, reason, elapsedMs, window {package, activity, title}, diff vs baseline (added/removed/changed incl. 'on -> off'), full new items and a new baseline token. On a change, coach marks are cleared (they would point at the old layout) unless keepMarks=true. If the row you hinted disappears from the diff (list re-sorted/scrolled), snapshot again and verify its state before moving on. On timeout changed=false with the current snapshot: just call again. Coaching loop: coach_draw hint -> wait_for_change -> read diff -> next hint. Never ask the human to say 'done'.",
+            "Block until the phone screen meaningfully changes (new window, tap result, toggle flipped, text changed), wait until the UI is quiet for debounceMs, then return. Ignores Bekon's own overlay and status-bar clock/icons. Returns changed, reason, elapsedMs, window {package, activity, title}, diff vs baseline (added/removed/changed incl. 'on -> off'), full new items and a new baseline token. Heads-up notifications, the notification shade and the status bar (SystemUI) never count as a change; a briefly missing accessibility tree is retried. On a change, coach marks are cleared (they would point at the old layout) unless keepMarks=true: pass keepMarks=true when your marks are anchored (ref/anchorText) or the change may be unrelated (e.g. a toast). Returns early with userEvents when the human uses the status-pill menu. If the row you hinted disappears from the diff (list re-sorted/scrolled), snapshot again and verify its state before moving on. On timeout changed=false with the current snapshot: just call again. Coaching loop: coach_draw hint -> wait_for_change -> read diff -> next hint. Never ask the human to say 'done'.",
             schema {
                 int("timeoutMs", required = false)
                 int("debounceMs", required = false)
@@ -664,13 +742,16 @@ class McpHandler(
         )
         val shapesSchema = buildJsonObject {
             put("type", "array")
-            put("description", "Marks in real SCREEN coordinates (same as snapshot/tap). Items: {type:box,x,y,w,h | bounds:[l,t,r,b]}, {type:circle,x,y,r | bounds}, {type:arrow,x1,y1,x2,y2} (head at x2,y2), {type:underline,x1,y1,x2[,y2] | bounds}, {type:text,x,y,label}. Optional label (short, e.g. 'tap here') and color (red/green/blue/yellow/orange or #rrggbb).")
+            put("description", "Marks in real SCREEN coordinates (same as snapshot/tap). Items: {type:box,x,y,w,h | bounds:[l,t,r,b]}, {type:circle,x,y,r | bounds}, {type:arrow,x1,y1,x2,y2} (head at x2,y2), {type:underline,x1,y1,x2[,y2] | bounds}, {type:text,x,y,label}. Instead of coordinates you can pass ref (from your latest snapshot) or anchorText/anchorContains: the mark is placed on that node and follows it while the layout shifts. Optional label (short, e.g. 'tap here') and color (red/green/blue/yellow/orange or #rrggbb).")
             put("items", buildJsonObject {
                 put("type", "object")
                 put("properties", buildJsonObject {
                     put("type", buildJsonObject { put("type", "string"); put("enum", buildJsonArray { pro.potoki.bekon.agent.coach.Sketch.KINDS.forEach { add(JsonPrimitive(it)) } }) })
                     for (k in listOf("x", "y", "w", "h", "r", "x1", "y1", "x2", "y2")) put(k, buildJsonObject { put("type", "number") })
                     put("bounds", buildJsonObject { put("type", "array"); put("items", buildJsonObject { put("type", "number") }) })
+                    put("ref", buildJsonObject { put("type", "string"); put("description", "Anchor to a node of your latest snapshot (e.g. e12): bounds come from it and the mark follows it when the layout shifts") })
+                    put("anchorText", buildJsonObject { put("type", "string"); put("description", "Anchor to the node with this exact text/contentDescription on the current screen (clickable node preferred)") })
+                    put("anchorContains", buildJsonObject { put("type", "string") })
                     put("label", buildJsonObject { put("type", "string") })
                     put("color", buildJsonObject { put("type", "string") })
                 })

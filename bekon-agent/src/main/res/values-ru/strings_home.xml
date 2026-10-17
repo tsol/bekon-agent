@@ -70,4 +70,18 @@
     <string name="core_ready_title">Агент теперь видит и может подсказывать</string>
     <string name="core_share_early">Уже общаетесь с агентом? Отправьте ссылку сейчас</string>
     <string name="optional_title">Необязательно (%1$d/%2$d) — поможет агент</string>
+    <string name="conn_not_ready">Агент пока не может подключиться</string>
+    <string name="conn_ready">Агент может подключиться</string>
+    <string name="conn_disconnected">Агент не подключён</string>
+    <string name="conn_connected">Подключён: %1$s</string>
+    <string name="conn_connected_body">Агент видит экран и может действовать на телефоне. Остановить можно в любой момент.</string>
+    <string name="conn_missing">Не хватает: %1$s</string>
+    <string name="step1_session">Bekon попросит доступ к экрану и создаст личную ссылку.</string>
+    <string name="step1_notifications">Просьбы агента Bekon показывает в уведомлениях.</string>
+    <string name="step1_restricted">В сведениях о приложении нажмите ⋮ → «Разрешить ограниченные настройки» и вернитесь.</string>
+    <string name="step1_a11y">Найдите %1$s → Bekon Gestures и включите.</string>
+    <string name="verb_start">Начать</string>
+    <string name="verb_enable">Включить</string>
+    <string name="verb_open">Открыть</string>
+    <string name="verb_i_did">Я сделал</string>
 </resources>

@@ -216,33 +216,8 @@ fun BekonHome(state: HomeState, tick: Int = 0, onIntent: (HomeIntent) -> Unit) {
                 Spacer(Modifier.width(12.dp))
                 Text("Bekon Agent", style = MaterialTheme.typography.headlineSmall)
             }
-            if (state.isRunning) {
-                // Always-visible remote-session indicator with a one-tap Stop (Play policy).
-                Card(
-                    colors = androidx.compose.material3.CardDefaults.cardColors(
-                        containerColor = androidx.compose.ui.graphics.Color(0xFFE8A07A),
-                    ),
-                ) {
-                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            stringResource(R.string.home_session_active),
-                            Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Button(onClick = { onIntent(HomeIntent.Stop) }) { Text(stringResource(R.string.home_stop)) }
-                    }
-                }
-            }
-            if (state.isRunning && agents.isNotEmpty()) AgentsCard(agents, state.canShowQr) { showQr = true }
+            // One connection status card (state machine) + one wizard step; Stop lives in the card.
             pro.potoki.bekon.agent.ui.SetupWizard(state, agents, tick, onIntent) { showQr = true }
-
-            if (state.isRunning || state.phase == SessionPhase.STARTING) {
-                Button(
-                    onClick = { onIntent(HomeIntent.Stop) },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                ) { Text(stringResource(R.string.home_stop)) }
-            }
 
             state.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)

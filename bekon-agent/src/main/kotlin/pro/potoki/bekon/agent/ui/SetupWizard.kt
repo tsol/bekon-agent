@@ -23,6 +23,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -49,10 +53,19 @@ import pro.potoki.bekon.agent.setup.DeviceSetupGuide
 /** Core steps the wizard drives itself (no AI) until the agent can SEE and DRAW. */
 enum class CoreStep { SESSION, NOTIFICATIONS, RESTRICTED, A11Y, READY }
 
+/** Connection card states (one card on the home screen). */
+enum class ConnState { NOT_READY, READY, DISCONNECTED, CONNECTED }
+
+/**
+ * Home screen body for the simplified build: ONE connection status card (state machine) and, while
+ * not ready, ONE wizard step (short title + one sentence + one primary button). Statuses are re-read
+ * on every resume ([tick]); the next step appears by itself.
+ */
 @Composable
 fun SetupWizard(state: HomeState, agents: List<String>, tick: Int, onIntent: (HomeIntent) -> Unit, onShowQr: () -> Unit) {
     val ctx = LocalContext.current
     val guide = remember { DeviceSetupGuide(ctx, projectionActive = { state.captureGranted }) }
+    val conn by pro.potoki.bekon.agent.access.AgentConnections.state.collectAsState()
     val notifOk = remember(tick) { androidx.core.app.NotificationManagerCompat.from(ctx).areNotificationsEnabled() }
     val a11yOk = state.gesturesOn || pro.potoki.bekon.agent.device.touch.TouchService.isBound()
     val restrictedNeeded = remember(tick, a11yOk) {
@@ -69,8 +82,94 @@ fun SetupWizard(state: HomeState, agents: List<String>, tick: Int, onIntent: (Ho
         CoreStep.RESTRICTED -> !restrictedNeeded; CoreStep.A11Y -> a11yOk; CoreStep.READY -> true
     }
     val current = core.firstOrNull { !ok(it) } ?: CoreStep.READY
-    // Step finished (auto-advance on resume): drop the Settings hint notification.
     androidx.compose.runtime.LaunchedEffect(current) { pro.potoki.bekon.agent.status.AgentAlert.clearHint(ctx) }
+
+    val cs = when {
+        state.isRunning && conn.active != null && !conn.idle -> ConnState.CONNECTED
+        current != CoreStep.READY -> ConnState.NOT_READY
+        conn.everConnected -> ConnState.DISCONNECTED
+        else -> ConnState.READY
+    }
+    ConnectionCard(cs, conn.active, current, core, ::ok, state, onIntent, onShowQr)
+    if (cs == ConnState.NOT_READY) StepCard(current, state, onIntent)
+}
+
+@Composable
+private fun ConnectionCard(
+    cs: ConnState, agent: String?, current: CoreStep, core: List<CoreStep>, ok: (CoreStep) -> Boolean,
+    state: HomeState, onIntent: (HomeIntent) -> Unit, onShowQr: () -> Unit,
+) {
+    val green = androidx.compose.ui.graphics.Color(0xFF1E8E3E)
+    val container = when (cs) {
+        ConnState.CONNECTED -> androidx.compose.ui.graphics.Color(0xFFE6F4EA)
+        ConnState.READY -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = container)) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val title = when (cs) {
+                ConnState.NOT_READY -> stringResource(R.string.conn_not_ready)
+                ConnState.READY -> stringResource(R.string.conn_ready)
+                ConnState.DISCONNECTED -> stringResource(R.string.conn_disconnected)
+                ConnState.CONNECTED -> stringResource(R.string.conn_connected, agent ?: "")
+            }
+            Text(title, style = MaterialTheme.typography.titleLarge,
+                color = if (cs == ConnState.CONNECTED) green else MaterialTheme.colorScheme.onSurface)
+            when (cs) {
+                ConnState.NOT_READY -> {
+                    Text(stringResource(R.string.conn_missing, stringResource(coreTitle(current))),
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    StepDots(core, ok)
+                }
+                ConnState.READY, ConnState.DISCONNECTED -> {
+                    if (!state.publicUrl.isNullOrBlank()) ShareButtons(state.publicUrl, onShowQr)
+                }
+                ConnState.CONNECTED -> {
+                    // Play policy: always-visible remote-session indicator with one-tap Stop.
+                    Text(stringResource(R.string.conn_connected_body), style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(onClick = { onIntent(HomeIntent.Stop) }) { Text(stringResource(R.string.home_stop)) }
+                        if (state.canShowQr) OutlinedButton(onClick = onShowQr) { Text(stringResource(R.string.show_qr_again)) }
+                    }
+                }
+            }
+            if (cs != ConnState.CONNECTED && (state.isRunning || state.phase == SessionPhase.STARTING)) {
+                OutlinedButton(onClick = { onIntent(HomeIntent.Stop) }) { Text(stringResource(R.string.home_stop)) }
+            }
+        }
+    }
+}
+
+/** Completed = green circle with a white check; pending = outlined circle; current = filled primary. */
+@Composable
+private fun StepDots(core: List<CoreStep>, ok: (CoreStep) -> Boolean) {
+    val green = androidx.compose.ui.graphics.Color(0xFF1E8E3E)
+    var currentSeen = false
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        core.forEach { c ->
+            val done = ok(c)
+            val isCurrent = !done && !currentSeen
+            if (isCurrent) currentSeen = true
+            androidx.compose.foundation.layout.Box(
+                Modifier.size(24.dp).then(
+                    when {
+                        done -> Modifier.background(green, androidx.compose.foundation.shape.CircleShape)
+                        isCurrent -> Modifier.background(MaterialTheme.colorScheme.primary, androidx.compose.foundation.shape.CircleShape)
+                        else -> Modifier.border(2.dp, MaterialTheme.colorScheme.outline, androidx.compose.foundation.shape.CircleShape)
+                    }
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (done) Text("✓", color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+/** One step: short title, one sentence, one filled primary button with a verb. */
+@Composable
+private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent) -> Unit) {
+    val ctx = LocalContext.current
     val section = stringResource(when {
         android.os.Build.MANUFACTURER.equals("samsung", true) -> R.string.core_a11y_section_samsung
         android.os.Build.MANUFACTURER.lowercase().let { it.contains("xiaomi") || it.contains("redmi") || it.contains("poco") } -> R.string.core_a11y_section_xiaomi
@@ -78,45 +177,24 @@ fun SetupWizard(state: HomeState, agents: List<String>, tick: Int, onIntent: (Ho
     })
     val hintTitle = stringResource(R.string.core_hint_title)
     fun hint(text: String) = pro.potoki.bekon.agent.status.AgentAlert.hint(ctx, hintTitle, text)
-
-    if (current != CoreStep.READY) {
-        val idx = core.indexOf(current) + 1
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(stringResource(R.string.core_progress, idx, core.size), style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary)
-                // Checkmark strip of the core steps.
-                core.forEach { c ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (ok(c)) "✓" else if (c == current) "➜" else "○",
-                            color = if (ok(c)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(coreTitle(c)),
-                            style = if (c == current) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium)
-                    }
-                }
-                androidx.compose.material3.HorizontalDivider()
-                Text(stringResource(coreIcon(current)), style = MaterialTheme.typography.displaySmall)
-                when (current) {
-                    CoreStep.SESSION -> {
-                        Text(stringResource(R.string.core_session_body), style = MaterialTheme.typography.bodyLarge)
-                        when {
-                            state.phase == SessionPhase.IDLE || state.phase == SessionPhase.STOPPING || state.phase == SessionPhase.FAILED ->
-                                Button(onClick = { onIntent(HomeIntent.Start) }, enabled = state.canStart || state.phase == SessionPhase.FAILED,
-                                    modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(stringResource(R.string.home_start)) }
-                            state.isRunning && !state.captureGranted ->
-                                Button(onClick = { ctx.startActivity(Intent(ctx, CapturePermissionActivity::class.java)) },
-                                    modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(stringResource(R.string.wiz_screen_share)) }
-                            else -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(Modifier.padding(end = 12.dp)); Text(stringResource(R.string.wiz_starting))
-                            }
-                        }
-                    }
-                    CoreStep.NOTIFICATIONS -> {
-                        Text(stringResource(R.string.core_notifications_body), style = MaterialTheme.typography.bodyLarge)
-                        val h = stringResource(R.string.core_hint_notifications)
-                        Button(onClick = {
-                            hint(h)
+    val hNotif = stringResource(R.string.core_hint_notifications)
+    val hRestr = stringResource(R.string.core_hint_restricted)
+    val hA11y = stringResource(R.string.core_hint_a11y, section)
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(coreTitle(current)), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(coreSentence(current), section), style = MaterialTheme.typography.bodyLarge)
+            val busy = current == CoreStep.SESSION && (state.phase == SessionPhase.STARTING || (state.isRunning && state.captureGranted))
+            if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(24.dp)); Spacer(Modifier.width(12.dp)); Text(stringResource(R.string.wiz_starting))
+            } else Button(
+                onClick = {
+                    when (current) {
+                        CoreStep.SESSION ->
+                            if (state.isRunning && !state.captureGranted) ctx.startActivity(Intent(ctx, CapturePermissionActivity::class.java))
+                            else onIntent(HomeIntent.Start)
+                        CoreStep.NOTIFICATIONS -> {
+                            hint(hNotif)
                             try {
                                 ctx.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                                     .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, ctx.packageName))
@@ -124,38 +202,20 @@ fun SetupWizard(state: HomeState, agents: List<String>, tick: Int, onIntent: (Ho
                                 ctx.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                     android.net.Uri.parse("package:${ctx.packageName}")))
                             }
-                        }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(stringResource(R.string.core_open_settings)) }
-                    }
-                    CoreStep.RESTRICTED -> {
-                        Text(stringResource(R.string.core_restricted_body), style = MaterialTheme.typography.bodyLarge)
-                        val h = stringResource(R.string.core_hint_restricted)
-                        Button(onClick = {
-                            hint(h)
+                        }
+                        CoreStep.RESTRICTED -> {
+                            hint(hRestr)
                             ctx.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                 android.net.Uri.parse("package:${ctx.packageName}")))
-                        }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(stringResource(R.string.core_open_app_info)) }
-                        val ha = stringResource(R.string.core_hint_a11y, section)
-                        OutlinedButton(onClick = { hint(ha); pro.potoki.bekon.agent.consent.Consent.openAccessibilitySettings(ctx) },
-                            modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.core_try_a11y)) }
+                        }
+                        CoreStep.A11Y -> { hint(hA11y); pro.potoki.bekon.agent.consent.Consent.openAccessibilitySettings(ctx) }
+                        CoreStep.READY -> {}
                     }
-                    CoreStep.A11Y -> {
-                        Text(stringResource(R.string.core_a11y_body, section), style = MaterialTheme.typography.bodyLarge)
-                        val ha = stringResource(R.string.core_hint_a11y, section)
-                        Button(onClick = { hint(ha); pro.potoki.bekon.agent.consent.Consent.openAccessibilitySettings(ctx) },
-                            modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(stringResource(R.string.core_open_settings)) }
-                    }
-                    CoreStep.READY -> {}
-                }
-                // Escape hatch: someone already chatting with an agent can hand over the link early.
-                if (state.isRunning && !state.publicUrl.isNullOrBlank() && agents.isEmpty()) {
-                    TextButton(onClick = onShowQr) { Text(stringResource(R.string.core_share_early)) }
-                }
-            }
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) { Text(stringResource(coreVerb(current, state))) }
         }
-    } else if (agents.isEmpty()) {
-        ShareCard(state.publicUrl!!, onShowQr, ready = true)
     }
-    Checklist(tick, state)
 }
 
 private fun coreTitle(c: CoreStep) = when (c) {
@@ -164,32 +224,25 @@ private fun coreTitle(c: CoreStep) = when (c) {
     CoreStep.READY -> R.string.core_ready_title
 }
 
-/** Big "illustration" glyph per step (vector art can replace these later). */
-private fun coreIcon(c: CoreStep) = when (c) {
-    CoreStep.SESSION -> R.string.core_icon_session; CoreStep.NOTIFICATIONS -> R.string.core_icon_notifications
-    CoreStep.RESTRICTED -> R.string.core_icon_restricted; CoreStep.A11Y -> R.string.core_icon_a11y
-    CoreStep.READY -> R.string.core_icon_session
+private fun coreSentence(c: CoreStep) = when (c) {
+    CoreStep.SESSION -> R.string.step1_session; CoreStep.NOTIFICATIONS -> R.string.step1_notifications
+    CoreStep.RESTRICTED -> R.string.step1_restricted; CoreStep.A11Y -> R.string.step1_a11y
+    CoreStep.READY -> R.string.core_ready_title
+}
+
+private fun coreVerb(c: CoreStep, s: HomeState) = when (c) {
+    CoreStep.SESSION -> if (s.isRunning && !s.captureGranted) R.string.wiz_screen_share else R.string.verb_start
+    CoreStep.NOTIFICATIONS, CoreStep.A11Y -> R.string.verb_enable
+    CoreStep.RESTRICTED -> R.string.verb_open
+    CoreStep.READY -> R.string.verb_open
 }
 
 @Composable
-private fun WizardCard(title: String?, content: @Composable () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            title?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
-            content()
-        }
-    }
-}
-
-@Composable
-private fun ShareCard(url: String, onShowQr: () -> Unit, ready: Boolean = false) {
+private fun ShareButtons(url: String, onShowQr: () -> Unit) {
     val ctx = LocalContext.current
     val msg = remember(url) { Handoff.text(url) }
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (ready) Text("✓ " + stringResource(R.string.core_ready_title), style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary)
-            Text(stringResource(R.string.wiz_share_title), style = MaterialTheme.typography.headlineSmall)
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        run {
             Text(stringResource(R.string.wiz_share_body), style = MaterialTheme.typography.bodyLarge)
             val copied = stringResource(R.string.qr_copied_agent)
             Button(onClick = {
@@ -208,70 +261,3 @@ private fun ShareCard(url: String, onShowQr: () -> Unit, ready: Boolean = false)
     }
 }
 
-@Composable
-private fun Checklist(tick: Int, state: HomeState) {
-    val ctx = LocalContext.current
-    val guide = remember { DeviceSetupGuide(ctx, projectionActive = { state.captureGranted }) }
-    val prefs = remember { ctx.getSharedPreferences("bekon_wizard", Context.MODE_PRIVATE) }
-    var manual by remember { mutableStateOf(prefs.all.keys.toSet()) }
-    // Screen capture is part of Step 1; the rest comes from the OEM guide.
-    val steps = remember(tick, manual, state.gesturesOn) {
-        // Core steps (session, notifications, restricted, accessibility) live in the wizard above.
-        try { guide.uiSteps().filter { it.req !in setOf("projection", "accessibility", "restricted_settings", "notifications") } } catch (_: Exception) { emptyList() }
-    }
-    if (steps.isEmpty()) return
-    fun done(s: DeviceSetupGuide.UiStep) = s.status ?: (s.id in manual)
-    val n = steps.count(::done)
-    val allDone = n == steps.size
-    // Open while something is missing, collapsed once all done; the header toggles it.
-    var userToggle by rememberSaveable { mutableStateOf<Boolean?>(null) }
-    val open = userToggle ?: !allDone
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (allDone) "✓ " + stringResource(R.string.wiz_all_done)
-                    else stringResource(R.string.optional_title, n, steps.size),
-                    style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = { userToggle = !open }) {
-                    Text(stringResource(if (open) R.string.wiz_hide else R.string.wiz_show))
-                }
-            }
-            if (!open) return@Column
-            if (!allDone) Text(stringResource(R.string.wiz_checklist_body), style = MaterialTheme.typography.bodySmall)
-            steps.forEach { s ->
-                val ok = done(s)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (ok) "✓" else "○", style = MaterialTheme.typography.titleMedium,
-                        color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(s.title, style = MaterialTheme.typography.bodyLarge)
-                        if (!ok) Text(stringResource(explain(s.req)), style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (!ok) {
-                        if (s.canOpen) TextButton(onClick = {
-                            try { guide.open(s.id) } catch (e: Exception) {
-                                Toast.makeText(ctx, s.path, Toast.LENGTH_LONG).show()
-                            }
-                        }) { Text(stringResource(R.string.wiz_open)) }
-                        // Not detectable (OEM toggles): the human confirms it.
-                        if (s.status == null) TextButton(onClick = {
-                            prefs.edit().putBoolean(s.id, true).apply(); manual = manual + s.id
-                        }) { Text(stringResource(R.string.wiz_mark_done)) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun explain(req: String): Int = when (req) {
-    "accessibility" -> R.string.wiz_explain_accessibility
-    "restricted_settings" -> R.string.wiz_explain_restricted_settings
-    "notifications" -> R.string.wiz_explain_notifications
-    "battery" -> R.string.wiz_explain_battery
-    else -> R.string.wiz_explain_other
-}

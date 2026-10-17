@@ -15,13 +15,16 @@ import pro.potoki.bekon.agent.core.UiNode
  * `contains` (substring). Resource ids are not exposed by the snapshot yet.
  */
 object CoachScript {
-    data class Sel(val text: String?, val contains: String?) {
+    data class Sel(val text: String?, val contains: String?, val ref: String? = null) {
         fun matches(n: UiNode): Boolean {
+            if (ref != null) return n.ref == ref
+            // label = text, else contentDescription (icon-only buttons), resolved by NodeNameResolver.
             val l = n.label.trim()
             if (text != null && !l.equals(text, ignoreCase = true)) return false
             if (contains != null && !l.contains(contains, ignoreCase = true)) return false
             return text != null || contains != null
         }
+        val any: Boolean get() = text != null || contains != null || ref != null
     }
     data class When(
         val visible: Sel?, val notVisible: Sel?, val pkg: String?,
@@ -38,8 +41,8 @@ object CoachScript {
         return arr.mapIndexed { i, el ->
             val o = el as? JsonObject ?: throw IllegalArgumentException("rules[$i] is not an object")
             val w = o["when"] as? JsonObject ?: JsonObject(emptyMap())
-            fun sel(x: JsonObject?): Sel? = x?.let { Sel(it.s("text") ?: it.s("textVisible"), it.s("contains")) }
-                ?.takeIf { it.text != null || it.contains != null }
+            fun sel(x: JsonObject?): Sel? = x?.let { Sel(it.s("text") ?: it.s("textVisible") ?: it.s("desc"), it.s("contains"), it.s("ref")) }
+                ?.takeIf { it.any }
             fun state(k: String): Pair<Sel, Boolean>? = (w[k] as? JsonObject)?.let { so ->
                 val s = sel(so) ?: throw IllegalArgumentException("rules[$i].when.$k needs text or contains")
                 s to ((so["value"] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: true)
@@ -50,7 +53,7 @@ object CoachScript {
             val d = (o["draw"] as? JsonObject)?.let { dj ->
                 val type = (dj.s("type") ?: "circle").lowercase()
                 require(type in DRAW_TYPES) { "rules[$i].draw.type must be one of ${DRAW_TYPES.joinToString()}" }
-                val target = sel(dj["target"] as? JsonObject) ?: Sel(dj.s("targetText"), dj.s("targetContains")).takeIf { it.text != null || it.contains != null }
+                val target = sel(dj["target"] as? JsonObject) ?: Sel(dj.s("targetText"), dj.s("targetContains"), dj.s("targetRef")).takeIf { it.any }
                 Draw(type, target, dj.s("label"), Sketch.parseColor(dj.s("color")))
             }
             val a = (o["do"] as? JsonObject)?.let { aj ->
@@ -74,8 +77,8 @@ object CoachScript {
     /** Tap point for a tap action: explicit target, else the when node (smallest match). */
     fun actionTarget(r: Rule, items: List<UiNode>): UiNode? {
         val s = r.action?.target ?: r.`when`.visible ?: return null
-        return meaningful(items).filter { it.bounds != null && s.matches(it) }
-            .minByOrNull { val b = it.bounds!!; (b[2] - b[0]).toLong() * (b[3] - b[1]) }
+        val its = meaningful(items)
+        return preferClickable(its.filter { it.bounds != null && s.matches(it) }, its)
     }
 
     val DRAW_TYPES = listOf("circle", "box", "underline", "arrow_up", "arrow_down", "text", "back_hint")
@@ -98,8 +101,26 @@ object CoachScript {
         return listOf(Shape(Shape.Kind.ARROW, 12f, h * 0.55f, w * 0.3f, h * 0.55f, "$label (свайп от края экрана)", d.color))
     }
 
-    /** App content only: status bar and SystemUI nav bar (its "Назад"/"Специальные возможности" keys) never match rules. */
-    private fun meaningful(items: List<UiNode>) = items.filter { !it.statusBar && it.pkg != "com.android.systemui" }
+    const val OWN_PKG = "pro.potoki.bekon.agent"
+
+    /** App content only: status bar, SystemUI nav bar and Bekon's own UI (pill, menus) never match rules. */
+    private fun meaningful(items: List<UiNode>) = items.filter { !it.statusBar && it.pkg != "com.android.systemui" && it.pkg != OWN_PKG }
+
+    /**
+     * Prefer what the human can actually tap: a clickable match, else the smallest clickable node
+     * containing the match (row around a title), else the smallest match.
+     */
+    fun preferClickable(matches: List<UiNode>, all: List<UiNode>): UiNode? {
+        fun area(b: IntArray) = (b[2] - b[0]).toLong() * (b[3] - b[1])
+        matches.filter { it.clickable }.minByOrNull { area(it.bounds!!) }?.let { return it }
+        val m = matches.minByOrNull { area(it.bounds!!) } ?: return null
+        val b = m.bounds!!
+        val parent = all.filter { it.clickable && it.bounds != null && it !== m &&
+            it.bounds[0] <= b[0] && it.bounds[1] <= b[1] && it.bounds[2] >= b[2] && it.bounds[3] >= b[3] }
+            .minByOrNull { area(it.bounds!!) }
+        // A full-screen clickable container is not a useful target.
+        return if (parent != null && area(parent.bounds!!) < area(b) * 12) parent else m
+    }
 
     fun matches(w: When, items: List<UiNode>, pkg: String?): Boolean {
         val its = meaningful(items)
@@ -115,8 +136,10 @@ object CoachScript {
     fun target(r: Rule, items: List<UiNode>): UiNode? {
         val s = r.draw?.target ?: r.`when`.checked?.first ?: r.`when`.selected?.first ?: r.`when`.visible ?: return null
         val c = meaningful(items).filter { it.bounds != null && s.matches(it) }
-        val pool = if (r.draw?.type in setOf("circle", "box") && r.`when`.checked != null) c.filter { it.checkable }.ifEmpty { c } else c
-        return pool.minByOrNull { val b = it.bounds!!; (b[2] - b[0]).toLong() * (b[3] - b[1]) }
+        if (r.draw?.type in setOf("circle", "box") && r.`when`.checked != null) {
+            c.filter { it.checkable }.minByOrNull { val b = it.bounds!!; (b[2] - b[0]).toLong() * (b[3] - b[1]) }?.let { return it }
+        }
+        return preferClickable(c, meaningful(items))
     }
 
     fun evaluate(rules: List<Rule>, items: List<UiNode>, pkg: String?, screenW: Int, screenH: Int): Fired? {

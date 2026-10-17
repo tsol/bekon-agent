@@ -29,9 +29,10 @@ class AccessPromptActivity : Activity() {
         current = java.lang.ref.WeakReference(this)
         val ip = intent.getStringExtra(EXTRA_IP) ?: "unknown"
         val clientId = intent.getStringExtra(EXTRA_CLIENT) ?: ""
+        val replacing = intent.getStringExtra(EXTRA_REPLACING)
         AlertDialog.Builder(this)
-            .setTitle(getString(R.string.access_title))
-            .setMessage(getString(R.string.access_message, clientId, ip))
+            .setTitle(getString(if (replacing != null) R.string.access_replace_title else R.string.access_title))
+            .setMessage(if (replacing != null) getString(R.string.access_replace_message, replacing, clientId) else getString(R.string.access_message, clientId, ip))
             .setCancelable(false)
             .setPositiveButton(R.string.access_allow) { _, _ -> answer(token, true) }
             .setNegativeButton(R.string.access_deny) { _, _ -> answer(token, false) }
@@ -56,6 +57,7 @@ class AccessPromptActivity : Activity() {
     }
 
     companion object {
+        const val EXTRA_REPLACING = "replacing"
         const val EXTRA_TOKEN = "token"
         private const val EXTRA_IP = "ip"
         private const val EXTRA_CLIENT = "clientId"
@@ -68,7 +70,7 @@ class AccessPromptActivity : Activity() {
         private val handler = android.os.Handler(android.os.Looper.getMainLooper())
         @Volatile private var current: java.lang.ref.WeakReference<Activity>? = null
 
-        fun ask(context: Context, clientId: String, ip: String): Boolean {
+        fun ask(context: Context, clientId: String, ip: String, replacing: String? = null): Boolean {
             var created = false
             val p = synchronized(pending) {
                 val existing = pending[clientId]
@@ -77,7 +79,7 @@ class AccessPromptActivity : Activity() {
                 q.waiters++
                 q
             }
-            if (created) show(context, p, ip)
+            if (created) show(context, p, ip, replacing)
             val answered = try {
                 p.latch.await(WAIT_SECONDS, TimeUnit.SECONDS)
             } catch (e: InterruptedException) {
@@ -88,14 +90,15 @@ class AccessPromptActivity : Activity() {
             return answered && p.allowed.get()
         }
 
-        private fun show(context: Context, p: Pending, ip: String) {
+        private fun show(context: Context, p: Pending, ip: String, replacing: String?) {
             val intent = Intent(context, AccessPromptActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 putExtra(EXTRA_TOKEN, p.token)
                 putExtra(EXTRA_IP, ip)
                 putExtra(EXTRA_CLIENT, p.clientId)
+                replacing?.let { putExtra(EXTRA_REPLACING, it) }
             }
-            notify(context, intent, ip, p)
+            notify(context, intent, ip, p, replacing)
             try {
                 context.startActivity(intent)
             } catch (e: Exception) {
@@ -134,7 +137,7 @@ class AccessPromptActivity : Activity() {
             if (pending.isEmpty()) handler.post { current?.get()?.finish() }
         }
 
-        private fun notify(context: Context, intent: Intent, ip: String, p: Pending) {
+        private fun notify(context: Context, intent: Intent, ip: String, p: Pending, replacing: String?) {
             val nm = context.getSystemService(NotificationManager::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 nm.createNotificationChannel(
@@ -150,10 +153,11 @@ class AccessPromptActivity : Activity() {
                 Intent(context, AccessActionReceiver::class.java).setAction(a).putExtra(EXTRA_TOKEN, p.token),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            val text = context.getString(R.string.access_note_text, p.clientId, ip)
+            val text = if (replacing != null) context.getString(R.string.access_replace_message, replacing, p.clientId)
+                else context.getString(R.string.access_note_text, p.clientId, ip)
             val note = NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(context.getString(R.string.access_note_title, p.clientId))
+                .setContentTitle(if (replacing != null) context.getString(R.string.access_replace_title) else context.getString(R.string.access_note_title, p.clientId))
                 .setContentText(text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)

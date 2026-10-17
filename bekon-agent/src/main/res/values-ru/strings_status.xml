@@ -40,4 +40,7 @@
     <string name="pill_send">Отправить агенту</string>
     <string name="pill_cancel_all">Отменить всё</string>
     <string name="pill_also_stop">Также остановить сеанс</string>
+    <string name="access_replace_title">Заменить агента?</string>
+    <string name="access_replace_message">Заменить агента «%1$s» на «%2$s»? Одновременно может быть подключён только один агент.</string>
+    <string name="notif_ready_title">Bekon готов к подключению агента</string>
 </resources>

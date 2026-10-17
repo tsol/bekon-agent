@@ -134,14 +134,14 @@ class SessionService : Service() {
         gate = ClientGate(
             PrefsTrustedClients(applicationContext),
             paused = { _state.value.paused },
-        ) { clientId, ip -> AccessPromptActivity.ask(applicationContext, clientId, ip) }
+        ) { clientId, ip, replacing -> AccessPromptActivity.ask(applicationContext, clientId, ip, replacing) }
         createChannel()
         acquireWakeLock()
         stepEngine = StepEngine(stepDetectors())
         // No battery-optimization dialog on start: it is an optional step the human or agent opens on purpose.
         pro.potoki.bekon.agent.device.capture.ScreenCapture.onSystemStop = { onCaptureLost() }
         scope.launch {
-            pro.potoki.bekon.agent.access.AgentConnections.connected.collect {
+            pro.potoki.bekon.agent.access.AgentConnections.state.collect {
                 if (_state.value.isRunning) try { updateNotification(statusText()) } catch (_: Exception) {}
             }
         }
@@ -476,7 +476,13 @@ class SessionService : Service() {
         val st = pro.potoki.bekon.agent.status.AgentStatus.current.value
         // Latest agent text is always in the collapsed content so the human sees what the agent wants.
         val inNotif = st != null
-        val title = if (st?.state == StatusState.DONE) getString(R.string.notif_agent_finished) else getString(R.string.notif_session_title)
+        val conn = pro.potoki.bekon.agent.access.AgentConnections.state.value
+        val title = when {
+            st?.state == StatusState.DONE -> getString(R.string.notif_agent_finished)
+            conn.active != null && !conn.idle -> getString(R.string.notif_session_title)
+            // Until an agent actually connects this is readiness, not an active remote session.
+            else -> getString(R.string.notif_ready_title)
+        }
         val body = if (inNotif && st != null) {
             val lab = getString(when (st.state) {
                 StatusState.WORKING -> R.string.status_working; StatusState.WAITING -> R.string.status_waiting
