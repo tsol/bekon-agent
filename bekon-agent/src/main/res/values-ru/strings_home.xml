@@ -130,8 +130,8 @@
     <string name="g_row_update">Обновление ПО</string>
     <string name="g_row_system">Система</string>
     <string name="g_row_a11y">Специальные возможности</string>
-    <string name="g_row_visibility">Улучшения видимости</string>
-    <string name="g_row_interaction">Взаимодействие и ловкость</string>
+    <string name="g_row_visibility">Улучшение отображения</string>
+    <string name="g_row_interaction">Нарушение координации и взаимодействие</string>
     <string name="g_row_advanced">Дополнительные параметры</string>
     <string name="g_row_installed_apps">Установленные приложения</string>
     <string name="g_row_downloaded">Скачанные приложения</string>
@@ -152,7 +152,7 @@
     <string name="g_row_uninstall">Удалить</string>
     <string name="g_dlg_full_control">Разрешить Bekon Gestures полный контроль над устройством?</string>
     <string name="g_toggle_hint">Переключатель станет синим — это и есть «включено».</string>
-    <string name="g_cap_s1">Внизу списка — «Специальные возможности».</string>
+    <string name="g_cap_s1">Пролистайте вниз — «Специальные возможности».</string>
     <string name="g_cap_s2">Последний пункт — «Установленные приложения».</string>
     <string name="g_cap_x1">«Расширенные настройки».</string>
     <string name="g_cap_x2">«Специальные возможности».</string>
@@ -166,4 +166,18 @@
     <string name="g_cap_r1">Android заблокировал настройку: нажмите ⋮ справа вверху.</string>
     <string name="g_cap_r2">«Разрешить ограниченные настройки».</string>
     <string name="a11y_service_label">Bekon Gestures</string>
+    <string name="g_row_apps">Приложения</string>
+    <string name="g_row_hearing">Повышение слышимости</string>
+    <string name="g_row_a11y_shortcuts">Ярлыки специальных возможностей</string>
+    <string name="g_row_voice_access">Voice Access</string>
+    <string name="g_sub_voice_access">Управление устройством с помощью голосовых команд</string>
+    <string name="g_row_live_transcribe">Прямая расшифровка</string>
+    <string name="g_sub_live_transcribe">Преобразование речи в текст в реальном времени</string>
+    <string name="g_state_off">Выключено</string>
+    <string name="g_row_bekon_shortcut">Ярлык Bekon Gestures</string>
+    <string name="g_row_app_info">Информация о приложении</string>
+    <string name="g_scr_appinfo_oneui">Информация о приложении</string>
+    <string name="g_sub_allowed">Разрешено</string>
+    <string name="g_row_screen_time">Время использования экрана</string>
+    <string name="accessibility_service_description">Удалённая помощь Bekon: подключённый вами агент видит, что на экране, и может нажимать, листать и вводить текст за вас. Данные уходят только агенту, которого вы разрешили на этом телефоне. Это не инструмент для людей с ограниченными возможностями.</string>
 </resources>

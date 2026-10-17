@@ -170,4 +170,17 @@ Summary, briefly: what looks fine and what raises questions.</string>
     <string name="g_cap_r1">Blocked by Android: tap ⋮ top right.</string>
     <string name="g_cap_r2">“Allow restricted settings”.</string>
     <string name="a11y_service_label">Bekon Gestures</string>
+    <string name="g_row_apps">Apps</string>
+    <string name="g_row_hearing">Hearing enhancements</string>
+    <string name="g_row_a11y_shortcuts">Accessibility shortcuts</string>
+    <string name="g_row_voice_access">Voice Access</string>
+    <string name="g_sub_voice_access">Control your device with voice commands</string>
+    <string name="g_row_live_transcribe">Live Transcribe</string>
+    <string name="g_sub_live_transcribe">Real-time speech to text</string>
+    <string name="g_state_off">Off</string>
+    <string name="g_row_bekon_shortcut">Bekon Gestures shortcut</string>
+    <string name="g_row_app_info">App info</string>
+    <string name="g_scr_appinfo_oneui">App info</string>
+    <string name="g_sub_allowed">Allowed</string>
+    <string name="g_row_screen_time">Screen time</string>
 </resources>

@@ -75,9 +75,14 @@ private fun target(t: Int, icon: Long? = null, value: Int? = null) = MockRow(t, 
 
 fun restrictedSteps(oem: GuideOem = GuideOem.STOCK): List<GuideStep> {
     val st = if (oem == GuideOem.SAMSUNG) GuideStyle.ONEUI else GuideStyle.FLAT
+    // One UI: "Информация о приложении" with Уведомления / Разрешения / Время использования экрана.
+    val t = if (oem == GuideOem.SAMSUNG) R.string.g_scr_appinfo_oneui else R.string.g_scr_appinfo
+    val rows1 = if (oem == GuideOem.SAMSUNG)
+        listOf(r(R.string.g_row_notifications, value = R.string.g_sub_allowed), r(R.string.g_row_permissions), r(R.string.g_row_screen_time))
+    else listOf(r(R.string.g_row_permissions), r(R.string.g_row_notifications), r(R.string.g_row_battery))
     return listOf(
-        GuideStep(R.string.g_cap_r1, R.string.g_scr_appinfo, listOf(r(R.string.g_row_permissions), r(R.string.g_row_notifications), r(R.string.g_row_battery)), style = st, menuDots = true),
-        GuideStep(R.string.g_cap_r2, R.string.g_scr_appinfo, listOf(target(R.string.g_row_allow_restricted), r(R.string.g_row_uninstall)), style = st),
+        GuideStep(R.string.g_cap_r1, t, rows1, style = st, menuDots = true),
+        GuideStep(R.string.g_cap_r2, t, listOf(target(R.string.g_row_allow_restricted), r(R.string.g_row_uninstall)), style = st),
     )
 }
 
@@ -87,16 +92,23 @@ fun restrictedSteps(oem: GuideOem = GuideOem.STOCK): List<GuideStep> {
  */
 fun a11ySteps(oem: GuideOem): List<GuideStep> = when (oem) {
     GuideOem.SAMSUNG -> {
+        // Real One UI 8.5 (SM-A566E, ru) captured 2026-10-17: labels, row order, icon colours.
         val s = GuideStyle.ONEUI
         listOf(
             GuideStep(R.string.g_cap_s1, R.string.g_scr_settings, listOf(
-                r(R.string.g_row_battery, 0xFF35C759), r(R.string.g_row_general, 0xFF8E8E93),
-                target(R.string.g_row_a11y, 0xFF34A853), r(R.string.g_row_update, 0xFF7B61FF)), style = s),
+                r(R.string.g_row_apps, 0xFF3D7BF2), r(R.string.g_row_general, 0xFF6B6BA8),
+                target(R.string.g_row_a11y, 0xFF57B847), r(R.string.g_row_update, 0xFF3D7BF2)), style = s),
             GuideStep(R.string.g_cap_s2, R.string.g_row_a11y, listOf(
-                r(R.string.g_row_visibility), r(R.string.g_row_interaction), r(R.string.g_row_advanced),
-                target(R.string.g_row_installed_apps)), style = s),
-            GuideStep(R.string.g_cap_app, R.string.g_row_installed_apps, listOf(target(R.string.g_row_bekon, value = R.string.g_off)), style = s),
-            GuideStep(R.string.g_cap_toggle, R.string.g_row_bekon, listOf(target(R.string.g_off)), kind = Kind.TOGGLE, style = s),
+                r(R.string.g_row_hearing, 0xFF1DA59A), r(R.string.g_row_interaction, 0xFFE8618C),
+                r(R.string.g_row_a11y_shortcuts, 0xFF3D7BF2),
+                target(R.string.g_row_installed_apps, 0xFF3D7BF2)), style = s),
+            GuideStep(R.string.g_cap_app, R.string.g_row_installed_apps, listOf(
+                target(R.string.g_row_bekon, value = R.string.g_state_off),
+                r(R.string.g_row_voice_access, value = R.string.g_sub_voice_access),
+                r(R.string.g_row_live_transcribe, value = R.string.g_sub_live_transcribe)), style = s),
+            GuideStep(R.string.g_cap_toggle, R.string.g_row_bekon, listOf(
+                target(R.string.g_state_off), r(R.string.g_row_bekon_shortcut), r(R.string.g_row_app_info)),
+                kind = Kind.TOGGLE, style = s),
             GuideStep(R.string.g_cap_allow, R.string.g_row_bekon, listOf(r(R.string.g_row_deny), target(R.string.g_row_allow)),
                 kind = Kind.DIALOG, style = s, dialogText = R.string.g_dlg_full_control),
         )
@@ -179,7 +191,10 @@ private fun MockScreen(st: GuideStep) {
             }
             when (st.kind) {
                 Kind.LIST, Kind.DIALOG -> RowsCard(st.rows.takeIf { st.kind == Kind.LIST } ?: listOf(r(R.string.g_row_bekon, value = R.string.g_off)), oneUi, ring)
-                Kind.TOGGLE -> ToggleCard(st.rows.first(), oneUi, ring)
+                Kind.TOGGLE -> {
+                    ToggleCard(st.rows.first(), oneUi, ring, hint = st.rows.size == 1)
+                    if (st.rows.size > 1) RowsCard(st.rows.drop(1), oneUi, ring)
+                }
             }
         }
         if (st.kind == Kind.DIALOG) DialogMock(st, ring)
@@ -192,17 +207,21 @@ private fun RowsCard(rows: List<MockRow>, oneUi: Boolean, ring: Color) {
     Column(Modifier.fillMaxWidth().clip(shape).background(Color.White)) {
         rows.take(4).forEachIndexed { i, row ->
             val rs = RoundedCornerShape(12.dp)
+            val sub = oneUi && row.value != null
             Row(
-                Modifier.fillMaxWidth().height(38.dp).padding(horizontal = 4.dp, vertical = 2.dp)
+                Modifier.fillMaxWidth().height(if (sub) 44.dp else 38.dp).padding(horizontal = 4.dp, vertical = 2.dp)
                     .then(if (row.target) Modifier.border(3.dp, ring, rs) else Modifier).padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 row.icon?.let {
                     Box(Modifier.size(20.dp).background(Color(it), CircleShape)); Spacer(Modifier.width(10.dp))
                 }
-                Text(stringResource(row.text), color = Color(0xFF111111), fontSize = 14.sp, maxLines = 1,
+                if (sub) Column(Modifier.weight(1f)) {
+                    Text(stringResource(row.text), color = Color(0xFF111111), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(row.value!!), color = Color(0xFF7A7A7E), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                } else Text(stringResource(row.text), color = Color(0xFF111111), fontSize = 14.sp, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                row.value?.let { Text(stringResource(it), color = Color(0xFF8A8A8E), fontSize = 13.sp) }
+                if (!sub) row.value?.let { Text(stringResource(it), color = Color(0xFF8A8A8E), fontSize = 13.sp) }
                 if (!oneUi) Text("  ›", color = Color(0xFFB0B0B5), fontSize = 16.sp)
             }
             if (oneUi && i < rows.size - 1 && i < 3) Box(Modifier.padding(start = 16.dp).fillMaxWidth().height(1.dp).background(Color(0xFFEDEDED)))
@@ -211,7 +230,7 @@ private fun RowsCard(rows: List<MockRow>, oneUi: Boolean, ring: Color) {
 }
 
 @Composable
-private fun ToggleCard(row: MockRow, oneUi: Boolean, ring: Color) {
+private fun ToggleCard(row: MockRow, oneUi: Boolean, ring: Color, hint: Boolean = true) {
     val shape = RoundedCornerShape(if (oneUi) 22.dp else 12.dp)
     Row(
         Modifier.fillMaxWidth().height(52.dp).clip(shape).background(Color.White).padding(horizontal = 14.dp),
@@ -227,7 +246,7 @@ private fun ToggleCard(row: MockRow, oneUi: Boolean, ring: Color) {
             }
         }
     }
-    Text(stringResource(R.string.g_toggle_hint), color = Color(0xFF6E6E73), fontSize = 12.sp, maxLines = 2)
+    if (hint) Text(stringResource(R.string.g_toggle_hint), color = Color(0xFF6E6E73), fontSize = 12.sp, maxLines = 2)
 }
 
 @Composable
