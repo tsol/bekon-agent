@@ -177,8 +177,10 @@ class CoachScriptRunner(private val executor: ActionExecutor, private val coach:
     fun await(r: Run, timeoutMs: Long, onRuleChange: Boolean): Unit {
         val end = System.currentTimeMillis() + timeoutMs
         val startEvents = r.events.size
+        val ue = pro.potoki.bekon.agent.status.UserEvents.seq
         synchronized(r.lock) {
-            while (r.status == "running" && System.currentTimeMillis() < end && !(onRuleChange && r.events.size > startEvents)) {
+            while (r.status == "running" && System.currentTimeMillis() < end && !(onRuleChange && r.events.size > startEvents) &&
+                pro.potoki.bekon.agent.status.UserEvents.seq == ue) {
                 r.lock.wait(minOf(100L, end - System.currentTimeMillis()).coerceAtLeast(1))
             }
         }

@@ -32,4 +32,12 @@
     <string name="cap_paused">пауза</string>
     <string name="cap_step">шаг %1$d из %2$d</string>
     <string name="cap_agent">Агент %1$s</string>
+    <string name="pill_menu_title">Сказать агенту</string>
+    <string name="pill_back_to_app">Вернуться в Bekon</string>
+    <string name="pill_changed_mind">Я передумал</string>
+    <string name="pill_new_goal">Изменить цель</string>
+    <string name="pill_goal_hint">Что агенту сделать вместо этого?</string>
+    <string name="pill_send">Отправить агенту</string>
+    <string name="pill_cancel_all">Отменить всё</string>
+    <string name="pill_also_stop">Также остановить сеанс</string>
 </resources>

@@ -48,6 +48,7 @@ object CoachOverlay {
                 val v = view ?: install(svc)
                 v.shapes = if (append) v.shapes + shapes else shapes
                 v.invalidate()
+                onMarksChanged?.invoke()
                 main.removeCallbacks(clearTask)
                 shownAt = System.currentTimeMillis(); windowAtShow = lastWindow
                 if (ttlMs > 0) main.postDelayed(clearTask, ttlMs)
@@ -60,12 +61,33 @@ object CoachOverlay {
         return ok
     }
 
+    /** Called (main thread) whenever marks appear, change or go away: the status pill re-lays out. */
+    @Volatile var onMarksChanged: (() -> Unit)? = null
+
+    /** Screen-space areas covered by marks and their label bubbles (estimated), for the status pill to avoid. */
+    fun markBounds(density: Float): List<android.graphics.RectF> {
+        val shapes = view?.shapes ?: return emptyList()
+        val out = ArrayList<android.graphics.RectF>()
+        for (s in shapes) {
+            val pad = 12f * density
+            out += android.graphics.RectF(minOf(s.x1, s.x2) - pad, minOf(s.y1, s.y2) - pad, maxOf(s.x1, s.x2) + pad, maxOf(s.y1, s.y2) + pad)
+            val label = s.label
+            if (!label.isNullOrBlank()) {
+                val (ax, ay) = Sketch.labelAnchor(s)
+                val hw = (label.length * 9f * density / 2f).coerceAtMost(180f * density)
+                out += android.graphics.RectF(ax - hw - pad, ay - 48f * density, ax + hw + pad, ay + 48f * density)
+            }
+        }
+        return out
+    }
+
     fun clear() {
         main.post {
             main.removeCallbacks(clearTask)
             val v = view ?: return@post
             try { wm?.removeView(v) } catch (_: Exception) {}
             view = null
+            onMarksChanged?.invoke()
         }
     }
 

@@ -67,6 +67,7 @@ object GestureOverlay {
         enabled = svc.getSharedPreferences("wlya_prefs", Context.MODE_PRIVATE)
             .getBoolean(PREFS_ENABLED, true)
         main.post { install(svc) }
+        StatusPill.attach(svc)
         sessionJob?.cancel()
         sessionJob = scope.launch {
             pro.potoki.bekon.agent.session.SessionService.state.collect {
@@ -97,6 +98,7 @@ object GestureOverlay {
         sessionJob?.cancel(); sessionJob = null
         statusJob?.cancel(); statusJob = null
         agentsJob?.cancel(); agentsJob = null
+        StatusPill.detach()
         main.post {
             val v = view
             val wm = windowManager
@@ -153,12 +155,16 @@ object GestureOverlay {
         main.post {
             ensureInstalled()
             view?.showCoach(bbox, label)
+            StatusPill.relayout()
         }
     }
 
     fun clearCoach() {
-        main.post { view?.clearCoach() }
+        main.post { view?.clearCoach(); StatusPill.relayout() }
     }
+
+    /** Coach banner target (screen coords) the status pill must not cover. */
+    fun coachBounds(): Rect? = view?.coachBox()
 
     private fun ensureInstalled() {
         val svc = host ?: return
@@ -292,6 +298,8 @@ object GestureOverlay {
             invalidate()
         }
 
+        fun coachBox(): Rect? = coach?.bbox
+
         fun clearCoach() {
             coach = null
             invalidate()
@@ -325,7 +333,7 @@ object GestureOverlay {
             canvas.restore()
 
             drawCoach(canvas, ox, oy)
-            drawStatus(canvas)
+            // agent_status pill lives in its own small touchable window (StatusPill).
 
             for (m in marks) {
                 when (m) {

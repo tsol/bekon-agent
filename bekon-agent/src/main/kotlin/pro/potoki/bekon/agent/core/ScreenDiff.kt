@@ -14,7 +14,8 @@ object ScreenDiff {
     /** In-app clocks (e.g. MIUI Settings header "0:11") tick every minute: never a change. */
     private val CLOCK = Regex("^\\s*\\d{1,2}:\\d{2}(\\s?[AaPp]\\.?[Mm]\\.?)?\\s*$")
 
-    fun meaningful(items: List<UiNode>) = items.filter { !it.statusBar && !CLOCK.matches(it.label) }
+    // SystemUI (status bar, heads-up notifications, shade) is never a screen change for coaching.
+    fun meaningful(items: List<UiNode>) = items.filter { !it.statusBar && it.pkg != "com.android.systemui" && !CLOCK.matches(it.label) }
 
     /** Stable baseline token (16 hex chars, FNV-1a 64) of the meaningful items. */
     fun token(items: List<UiNode>): String {

@@ -71,6 +71,7 @@ class McpHandler(
 
     private val json = Json { ignoreUnknownKeys = true }
     private val scripts by lazy { CoachScriptRunner(executor, coach) }
+    init { pro.potoki.bekon.agent.status.UserEvents.stopCoaching = { scripts.run?.takeIf { it.status == "running" }?.let { scripts.stop() } } }
 
     private fun seenJson(seen: CoachScriptRunner.Seen, withPages: Boolean) = buildJsonObject {
         synchronized(seen) {
@@ -290,7 +291,8 @@ class McpHandler(
             ?: throw CapabilityException("wait_for_change: accessibility is off and screen capture is not running; press Start in Bekon")
         var changed = false
         var last = base
-        while (el() < timeout) {
+        val ueSeq = pro.potoki.bekon.agent.status.UserEvents.seq
+        while (el() < timeout && pro.potoki.bekon.agent.status.UserEvents.seq == ueSeq) {
             kotlinx.coroutines.delay(250)
             val g = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pixelGrid() } ?: continue
             if (differs(base, g)) {
@@ -313,6 +315,15 @@ class McpHandler(
         }
     }
 
+    /** The a11y tree is briefly unavailable during window transitions: retry for ~1.5 s before failing. */
+    private suspend fun snapshotRetry(): pro.potoki.bekon.agent.core.ScreenSnapshot {
+        var last: Exception? = null
+        repeat(6) {
+            try { return executor.snapshot() } catch (e: CapabilityException) { last = e; kotlinx.coroutines.delay(250) }
+        }
+        throw last!!
+    }
+
     private suspend fun waitForChange(args: JsonObject): JsonObject {
         if (executor.health()["touch"] == false) return waitForChangePixels(args)
         val timeout = (args.intOr("timeoutMs") ?: WAIT_DEFAULT_MS).coerceIn(0, WAIT_MAX_MS).toLong()
@@ -324,14 +335,16 @@ class McpHandler(
         fun elapsed() = (System.nanoTime() - t0) / 1_000_000
         val given = args.strOr("baseline")
         var baseItems: List<pro.potoki.bekon.agent.core.UiNode>? = given?.let { synchronized(baselines) { baselines[it] } }
-        val baseToken: String = given ?: remember(executor.snapshot().items.also { baseItems = it })
+        val baseToken: String = given ?: remember(snapshotRetry().items.also { baseItems = it })
         var seq = sig?.seq ?: 0L
         var lastPoll = 0L
         var reason = ""
         var result: pro.potoki.bekon.agent.core.ScreenSnapshot? = null
         var cur: pro.potoki.bekon.agent.core.ScreenSnapshot? = null
         var first = true
+        val ueSeq = pro.potoki.bekon.agent.status.UserEvents.seq
         while (true) {
+            if (pro.potoki.bekon.agent.status.UserEvents.seq != ueSeq) break
             val now = elapsed()
             val evt = sig != null && sig.seq != seq
             val poll = first || now - lastPoll >= POLL_MS
@@ -366,7 +379,7 @@ class McpHandler(
             if (elapsed() >= timeout) break
             kotlinx.coroutines.delay(50)
         }
-        val fin = result ?: cur ?: executor.snapshot()
+        val fin = result ?: cur ?: snapshotRetry()
         val token = remember(fin.items)
         val changed = result != null && token != baseToken
         // Marks are positioned for the old screen: after a list re-sort/scroll/new window they point at
@@ -420,7 +433,14 @@ class McpHandler(
             val r = pro.potoki.bekon.agent.setup.Launcher.launch(ctx, android.content.Intent(android.content.Intent.ACTION_VIEW, u), url, url)
             buildJsonObject { put("ok", r.opened); put("result", r.code); put("text", r.text) }
         }
-        "wait_for_change" -> waitForChange(args)
+        "wait_for_change" -> withUserEvents(waitForChange(args))
+        "user_events" -> {
+            val ev = pro.potoki.bekon.agent.status.UserEvents.drain()
+            buildJsonObject {
+                put("events", pro.potoki.bekon.agent.status.UserEvents.json(ev))
+                put("text", if (ev.isEmpty()) "no new user events" else ev.joinToString("; ") { it.type + (it.text?.let { t -> ": $t" } ?: "") } + ". " + pro.potoki.bekon.agent.status.UserEvents.DOC)
+            }
+        }
         "screenshot" -> {
             val scale = args.floatOr("scale") ?: ScreenshotDefaults.SCALE
             val quality = args.intOr("quality") ?: ScreenshotDefaults.QUALITY
@@ -477,7 +497,7 @@ class McpHandler(
             val t = (args.intOr("timeoutMs") ?: WAIT_DEFAULT_MS).coerceIn(0, WAIT_MAX_MS).toLong()
             val onChange = args.boolOr("returnOnRuleChange") == true
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { scripts.await(r, t, onChange) }
-            scriptJson(r)
+            withUserEvents(scriptJson(r))
         }
         "scan_list" -> {
             val dir = (args["direction"] as? JsonPrimitive)?.content ?: "down"
@@ -692,6 +712,7 @@ class McpHandler(
                 add("clear", buildJsonObject { put("type", "boolean"); put("description", "Remove the status") }, false)
             },
         )
+        tool("user_events", "Read (and consume) what the human told you from the phone's status-pill menu: back_to_app, changed_mind, new_goal {text}, cancel_all. Also attached as userEvents to wait_for_change / wait_for_script results (those return early when one arrives).", schema())
         tool("connection_info", "Bekon handoff: what this server is, its MCP endpoint and core tools.", schema())
         tool("coach_clear", "Remove all coach marks from the phone screen (also stops a running coach_script).", schema())
         tool(
@@ -772,6 +793,16 @@ class McpHandler(
         )
         tool("shortcut_open", "Open a saved shortcut by id. An app launches on the phone. A url opens in the browser. A script runs its rules on the phone and waits up to waitMs (default 20s) for done; then use wait_for_script if still running.", schema { str("id"); int("waitMs", required = false) })
         tool("shortcut_remove", "Delete a saved shortcut by id.", schema { str("id") })
+    }
+
+    /** Attach (and consume) pending pill-menu events so the agent sees them in its wait loop. */
+    private fun withUserEvents(o: JsonObject): JsonObject {
+        val ev = pro.potoki.bekon.agent.status.UserEvents.drain()
+        if (ev.isEmpty()) return o
+        val summary = (o["summary"] as? JsonPrimitive)?.content
+        return JsonObject(o + ("userEvents" to pro.potoki.bekon.agent.status.UserEvents.json(ev)) +
+            ("userEventsNote" to JsonPrimitive(pro.potoki.bekon.agent.status.UserEvents.DOC)) +
+            (if (summary != null) mapOf("summary" to JsonPrimitive("USER EVENT: " + ev.joinToString { it.type + (it.text?.let { t -> " '$t'" } ?: "") } + "\n" + summary)) else emptyMap()))
     }
 
     private fun deviceInfoJson() = buildJsonObject {

@@ -42,6 +42,13 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".status.PillMenuActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.DeviceDefault.Dialog" />
+
         <receiver
             android:name=".access.AccessActionReceiver"
             android:exported="false" />
