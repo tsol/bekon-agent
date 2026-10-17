@@ -128,6 +128,10 @@ class DeviceSetupGuide(
 
     /** Try each intent of [stepId] in order; returns description of what opened. */
     fun open(stepId: String): String {
+        extraIntent(stepId)?.let { (name, i) ->
+            val r = Launcher.launch(ctx, i, name, stepId)
+            return r.text
+        }
         val st = steps().firstOrNull { it.s("id") == stepId }
             ?: data["common"]!!.jsonArray.map { it.jsonObject }.firstOrNull { it.s("id") == stepId }
             ?: throw IllegalArgumentException("unknown step $stepId; see device_setup_guide")
@@ -160,17 +164,10 @@ class DeviceSetupGuide(
             if (o.s("bekon") != "projection") i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
             val what = o.s("component").ifEmpty { o.s("action").ifEmpty { "launcher" } }
             if (background) {
-                // Android blocks background activity starts silently: hand the user a heads-up to tap instead.
                 if (o.s("bekon") != "projection" && i.resolveActivity(ctx.packageManager) == null) {
                     tried += "$what: not resolvable"; continue
                 }
-                pro.potoki.bekon.agent.status.AgentAlert.lastSetupIntent = i
-                pro.potoki.bekon.agent.status.AgentAlert.post(
-                    ctx, ctx.getString(pro.potoki.bekon.agent.R.string.setup_tap_to_open, st.loc("title")),
-                    ctx.getString(pro.potoki.bekon.agent.R.string.setup_tap_body) + "\n" + st.loc("path"), i,
-                )
-                return "$BLOCKED: user must tap notification '${ctx.getString(pro.potoki.bekon.agent.R.string.setup_tap_to_open, st.loc("title"))}' (target $what). " +
-                    "Bekon is in the background, so Android does not allow opening the screen directly. Ask the human to tap the notification, then wait_for_change."
+                return Launcher.launch(ctx, i, st.loc("title"), what, st.loc("path")).text
             }
             try {
                 pro.potoki.bekon.agent.status.AgentAlert.lastSetupIntent = i
@@ -188,7 +185,25 @@ class DeviceSetupGuide(
     private fun JsonObject.loc(k: String): String =
         (this[k] as? JsonObject)?.let { o -> o.s(lang()).ifEmpty { o.s("en") } } ?: s(k)
 
-    companion object { const val BLOCKED = "blocked_background" }
+    /** One checklist row for the in-app wizard (same steps as device_setup_guide). */
+    data class UiStep(val id: String, val req: String, val title: String, val path: String, val status: Boolean?, val canOpen: Boolean)
+
+    fun uiSteps(): List<UiStep> = steps().map { st ->
+        UiStep(st.s("id"), st.s("req"), st.loc("title"), st.loc("path"), status(st.s("req")),
+            (st["intents"] as? JsonArray)?.isNotEmpty() == true)
+    }
+
+    /** Built-in screens that are not OEM steps. */
+    private fun extraIntent(id: String): Pair<String, Intent>? {
+        val ru = lang() == "ru"
+        return when (id) {
+            "app_details" -> (if (ru) "Сведения о приложении Bekon" else "Bekon app info") to
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+            "play_listing" -> "Google Play: Bekon Agent" to
+                Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${ctx.packageName}"))
+            else -> null
+        }
+    }
 
     private fun JsonObject.s(k: String) = (this[k] as? JsonPrimitive)?.content ?: ""
 }

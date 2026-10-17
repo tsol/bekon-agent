@@ -23,7 +23,7 @@ object AgentStatus {
         companion object { fun of(s: String?): State? = entries.firstOrNull { it.wire == s?.trim()?.lowercase() } }
     }
 
-    data class Status(val text: String, val state: State, val setAtMs: Long, val ttlMs: Long)
+    data class Status(val text: String, val state: State, val setAtMs: Long, val ttlMs: Long, val top: Boolean = false)
 
     const val MAX_CHARS = 80
     const val MAX_TTL_MS = 3_600_000L
@@ -35,9 +35,9 @@ object AgentStatus {
     private var ttlJob: Job? = null
 
     /** Validated request; pure so it can be unit-tested. */
-    data class Request(val text: String, val state: State, val ttlMs: Long, val clear: Boolean, val truncated: Boolean)
+    data class Request(val text: String, val state: State, val ttlMs: Long, val clear: Boolean, val truncated: Boolean, val top: Boolean = false)
 
-    fun parse(text: String?, state: String?, ttlMs: Long?, clear: Boolean?): Request {
+    fun parse(text: String?, state: String?, ttlMs: Long?, clear: Boolean?, position: String? = null): Request {
         if (clear == true) return Request("", State.WORKING, 0, true, false)
         val st = if (state.isNullOrBlank()) State.WORKING
             else State.of(state) ?: throw IllegalArgumentException("state must be one of working|done|waiting|error")
@@ -46,14 +46,19 @@ object AgentStatus {
         val cut = t.length > MAX_CHARS
         val out = if (cut) t.take(MAX_CHARS - 1).trimEnd() + "…" else t
         val ttl = (ttlMs ?: 0L).coerceIn(0L, MAX_TTL_MS)
-        return Request(out, st, ttl, false, cut)
+        val top = when (position?.trim()?.lowercase()) {
+            null, "", "bottom" -> false
+            "top" -> true
+            else -> throw IllegalArgumentException("position must be top|bottom")
+        }
+        return Request(out, st, ttl, false, cut, top)
     }
 
     @Synchronized
     fun apply(r: Request): Status? {
         ttlJob?.cancel(); ttlJob = null
         if (r.clear) { _current.value = null; return null }
-        val s = Status(r.text, r.state, System.currentTimeMillis(), r.ttlMs)
+        val s = Status(r.text, r.state, System.currentTimeMillis(), r.ttlMs, r.top)
         _current.value = s
         if (r.ttlMs > 0) ttlJob = scope.launch {
             delay(r.ttlMs)

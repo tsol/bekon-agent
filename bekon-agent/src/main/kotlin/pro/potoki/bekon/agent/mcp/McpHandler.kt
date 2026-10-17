@@ -261,11 +261,14 @@ class McpHandler(
         val f = executor.screenshot(0.1f, 60, "jpeg")
         val bm = android.graphics.BitmapFactory.decodeByteArray(f.bytes, 0, f.bytes.size) ?: null
         bm?.let {
-            val gw = 27; val gh = 48
-            val top = (it.height * 0.05).toInt(); val bot = (it.height * 0.93).toInt()
+            // Downscaled grayscale grid. Crop the status bar (clock/icons tick) and the bottom strip
+            // (nav bar + the agent_status pill), and the bacon frame edges.
+            val gw = 36; val gh = 64
+            val top = (it.height * 0.06).toInt(); val bot = (it.height * 0.86).toInt()
+            val l = (it.width * 0.03).toInt(); val r = (it.width * 0.97).toInt()
             val out = IntArray(gw * gh)
             for (j in 0 until gh) for (i in 0 until gw) {
-                val x = (i + 0.5f) * it.width / gw; val y = top + (j + 0.5f) * (bot - top) / gh
+                val x = l + (i + 0.5f) * (r - l) / gw; val y = top + (j + 0.5f) * (bot - top) / gh
                 val c = it.getPixel(x.toInt().coerceIn(0, it.width - 1), y.toInt().coerceIn(0, it.height - 1))
                 out[j * gw + i] = ((c shr 16 and 255) * 3 + (c shr 8 and 255) * 6 + (c and 255)) / 10
             }
@@ -279,7 +282,8 @@ class McpHandler(
         val debounce = (args.intOr("debounceMs") ?: 600).coerceIn(0, 5000).toLong()
         val t0 = System.currentTimeMillis()
         fun el() = System.currentTimeMillis() - t0
-        fun differs(a: IntArray, b: IntArray) = a.indices.count { Math.abs(a[it] - b[it]) > 24 } > a.size / 50
+        // Changed when > 1.5% of cells moved by more than a JPEG-noise margin.
+        fun differs(a: IntArray, b: IntArray) = a.indices.count { Math.abs(a[it] - b[it]) > 28 } > a.size * 15 / 1000
         val base = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pixelGrid() }
             ?: throw CapabilityException("wait_for_change: accessibility is off and screen capture is not running; press Start in Bekon")
         var changed = false
@@ -403,7 +407,16 @@ class McpHandler(
         "snapshot" -> {
             val s = executor.snapshot()
             val t = remember(s.items)
-            JsonObject(snapshotJson(s, t) + ("window" to foregroundJson()))
+            val fg = foregroundJson()
+            JsonObject(snapshotJson(s, t) + ("window" to fg) + ("package" to (fg["package"] ?: JsonPrimitive(""))))
+        }
+        "open_url" -> {
+            val url = args.str("url").trim()
+            val u = android.net.Uri.parse(url)
+            if (u.scheme != "https") throw IllegalArgumentException("open_url accepts only https:// urls")
+            val ctx = pro.potoki.bekon.agent.BekonApp.appContext ?: throw CapabilityException("open_url: app context unavailable")
+            val r = pro.potoki.bekon.agent.setup.Launcher.launch(ctx, android.content.Intent(android.content.Intent.ACTION_VIEW, u), url, url)
+            buildJsonObject { put("ok", r.opened); put("result", r.code); put("text", r.text) }
         }
         "wait_for_change" -> waitForChange(args)
         "screenshot" -> {
@@ -522,7 +535,7 @@ class McpHandler(
         "shortcuts" -> shortcutStore().listPayload()
         "agent_status" -> {
             val req = pro.potoki.bekon.agent.status.AgentStatus.parse(
-                args.strOr("text"), args.strOr("state"), args.intOr("ttlMs")?.toLong(), args.boolOr("clear"))
+                args.strOr("text"), args.strOr("state"), args.intOr("ttlMs")?.toLong(), args.boolOr("clear"), args.strOr("position"))
             val st = pro.potoki.bekon.agent.status.AgentStatus.apply(req)
             val overlay = pro.potoki.bekon.agent.device.touch.GestureOverlay.canShowStatus()
             val ctx = pro.potoki.bekon.agent.BekonApp.appContext
@@ -562,7 +575,7 @@ class McpHandler(
         "open_setup_screen" -> {
             val g = setup ?: throw CapabilityException("setup guide: not available")
             buildJsonObject { val opened = g.open(args.str("step"))
-            val blocked = opened.startsWith(pro.potoki.bekon.agent.setup.DeviceSetupGuide.BLOCKED)
+            val blocked = opened.startsWith(pro.potoki.bekon.agent.setup.Launcher.BLOCKED)
             put("ok", !blocked)
             put("result", if (blocked) "blocked_background: user must tap notification" else "opened")
             val next = if (executor.health()["touch"] == false)
@@ -661,7 +674,7 @@ class McpHandler(
         )
         tool(
             "agent_status",
-            "Show a short status line to the human on the phone (pill at the top inside the bacon frame, touches pass through; works across apps). " +
+            "Show a short status line to the human on the phone (compact pill at the bottom above the nav bar by default, position=top to move it, touches pass through; works across apps). " +
                 "Use it so the human knows what you are doing: state=working at the start of a task, waiting when they must act (e.g. tap Allow), done with a short summary when finished " +
                 "(also updates the notification to 'Agent finished'), error when stuck. Write text in the human's language (deviceInfo.language, e.g. ru). " +
                 "Persists until replaced, clear=true, ttlMs elapses or the session stops. If Accessibility is off it falls back to the session notification text.",
@@ -669,6 +682,7 @@ class McpHandler(
                 add("text", buildJsonObject { put("type", "string"); put("maxLength", pro.potoki.bekon.agent.status.AgentStatus.MAX_CHARS); put("description", "Short message, ≤ ~60 chars, in the human's language") }, false)
                 str("state", enum = listOf("working", "done", "waiting", "error"), required = false)
                 int("ttlMs", required = false)
+                str("position", enum = listOf("bottom", "top"), required = false)
                 add("clear", buildJsonObject { put("type", "boolean"); put("description", "Remove the status") }, false)
             },
         )
@@ -712,7 +726,8 @@ class McpHandler(
             "Phone manufacturer/model/SDK/ROM and the ordered OEM-specific setup steps Bekon needs (restricted settings, accessibility, notifications, autostart, battery, background popups, screen capture 'Entire screen'), each with EN/RU text, settings path and live status ok/todo/unknown. Use before coaching a user through setup.",
             schema(),
         )
-        tool("open_setup_screen", "Open the best settings screen for a step id from device_setup_guide (tries OEM intents with fallbacks).", schema { str("step") })
+        tool("open_setup_screen", "Open the best settings screen for a step id from device_setup_guide (tries OEM intents with fallbacks). Extra ids: app_details (Android App info for Bekon), play_listing (Bekon in Google Play). If the result is blocked_background, the human must tap the notification.", schema { str("step") })
+        tool("open_url", "Open an https URL on the phone in the default browser/app without saving a shortcut. Returns blocked_background if Android blocked it (the human then taps a notification).", schema { str("url") })
         tool("tap", "Tap at screen coordinates", schema { int("x"); int("y") })
         tool("swipe", "Swipe between two points", schema { int("x1"); int("y1"); int("x2"); int("y2"); int("ms", required = false) })
         tool("longPress", "Long-press at a screen coordinate", schema { int("x"); int("y") })
@@ -759,6 +774,8 @@ class McpHandler(
         put("languageName", pro.potoki.bekon.agent.status.AgentStatus.languageName())
         put("manufacturer", android.os.Build.MANUFACTURER ?: "")
         put("model", android.os.Build.MODEL ?: "")
+        put("appVersionName", pro.potoki.bekon.agent.BuildConfig.VERSION_NAME)
+        put("appVersionCode", pro.potoki.bekon.agent.BuildConfig.VERSION_CODE)
     }
 
     private fun shortcutStore(): ShortcutStore =

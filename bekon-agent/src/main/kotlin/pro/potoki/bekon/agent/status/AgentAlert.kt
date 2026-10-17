@@ -69,6 +69,32 @@ object AgentAlert {
         post(ctx, st.text, ctx.getString(R.string.alert_status_body, who, lab, st.text), lastSetupIntent)
     }
 
+    private const val HINT_ID = 78
+
+    /** Sticky "next step" hint while the human is inside system Settings (no overlay before Accessibility is on). */
+    fun hint(ctx: Context, title: String, text: String) {
+        channel(ctx)
+        val pi = PendingIntent.getActivity(
+            ctx, HINT_ID, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val note = NotificationCompat.Builder(ctx, CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOnlyAlertOnce(true)
+            .setOngoing(true)
+            .setContentIntent(pi)
+            .build()
+        try { ctx.getSystemService(NotificationManager::class.java).notify(HINT_ID, note) } catch (_: Exception) {}
+    }
+
+    fun clearHint(ctx: Context) {
+        ctx.getSystemService(NotificationManager::class.java).cancel(HINT_ID)
+    }
+
     fun clear(ctx: Context) {
         ctx.getSystemService(NotificationManager::class.java).cancel(NOTE_ID)
     }

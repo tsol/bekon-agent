@@ -370,7 +370,7 @@ object GestureOverlay {
             // no bbox: no top banner — the bacon frame alone signals coach mode.
         }
 
-        /** agent_status pill: top-centre inside the bacon frame, below the status bar. */
+        /** agent_status pill: compact, bottom-centre above the nav bar by default (never covers app headers/search); top on request. */
         private fun drawStatus(canvas: Canvas) {
             val st = status ?: return
             val d = resources.displayMetrics.density
@@ -381,21 +381,21 @@ object GestureOverlay {
                 StatusState.ERROR -> Color.argb(240, 190, 40, 40) to pro.potoki.bekon.agent.R.string.status_error
             }
             pillBg.color = bg
-            pillText.textSize = 15f * d
-            pillLabel.textSize = 11f * d
+            pillText.textSize = 13f * d
+            pillLabel.textSize = 10f * d
             pillEdge.strokeWidth = 1.5f * d
             icon.strokeWidth = 2.5f * d
-            val pad = 12f * d
-            val iconSz = 18f * d
+            val pad = 10f * d
+            val iconSz = 15f * d
             val maxW = width - 2 * (pro.potoki.bekon.agent.coach.BaconFrame.VISIBLE_DP * d + 12f * d)
             val label = context.getString(labelRes)
             val textMax = (maxW - pad * 3 - iconSz).coerceAtLeast(40f * d)
             val txt = android.text.TextUtils.ellipsize(st.text, android.text.TextPaint(pillText), textMax, android.text.TextUtils.TruncateAt.END).toString()
             val tw = maxOf(pillText.measureText(txt), pillLabel.measureText(label))
             val w = pad * 3 + iconSz + tw
-            val h = 46f * d
+            val h = 38f * d
             val left = (width - w) / 2f
-            val top = safeTop() + 6f * d
+            val top = if (st.top) safeTop() + 6f * d else height - safeBottom() - h - 10f * d
             val rect = android.graphics.RectF(left, top, left + w, top + h)
             canvas.drawRoundRect(rect, h / 2, h / 2, pillBg)
             canvas.drawRoundRect(rect, h / 2, h / 2, pillEdge)
@@ -422,8 +422,8 @@ object GestureOverlay {
                 }
             }
             val tx = left + pad * 2 + iconSz
-            canvas.drawText(label, tx, top + 17f * d, pillLabel)
-            canvas.drawText(txt, tx, top + 36f * d, pillText)
+            canvas.drawText(label, tx, top + 14f * d, pillLabel)
+            canvas.drawText(txt, tx, top + 30f * d, pillText)
         }
 
         private fun drawLabel(canvas: Canvas, x: Float, y: Float, label: String) {

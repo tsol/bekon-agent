@@ -50,7 +50,14 @@ object ChangeMonitor : ChangeSignal {
         val m = LinkedHashMap<String, String>()
         val svc = TouchService.active
         val root = try { svc?.rootInActiveWindow } catch (_: Exception) { null }
-        val pkg = root?.packageName?.toString() ?: fgPkg
+        // Root can be null (or our own overlay) mid-transition: fall back to the active app window, then the last event.
+        val own = svc?.packageName
+        val pkg = root?.packageName?.toString()?.takeIf { it != own }
+            ?: try {
+                svc?.windows?.firstOrNull { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION && it.isActive }
+                    ?.root?.packageName?.toString()
+            } catch (_: Exception) { null }
+            ?: fgPkg
         if (pkg.isNotEmpty()) m["package"] = pkg
         if (fgCls.isNotEmpty() && fgPkg == pkg) m["activity"] = fgCls
         try {

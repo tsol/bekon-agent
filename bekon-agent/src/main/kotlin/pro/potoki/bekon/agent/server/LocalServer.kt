@@ -65,6 +65,13 @@ class LocalServer(
                     return@intercept
                 }
                 val path = call.request.path()
+                if (stopping && path == "/mcp") {
+                    call.respondText(
+                        "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32001,\"message\":\"session_stopping: the owner stopped the Bekon session on the phone\"}}",
+                        io.ktor.http.ContentType.Application.Json, HttpStatusCode.ServiceUnavailable,
+                    )
+                    return@intercept
+                }
                 val g = gate
                 if (g != null && path != "/health" && path != "/mcp" && path !in GUIDE_PATHS) {
                     val headers = call.request.headers
@@ -173,9 +180,13 @@ class LocalServer(
         engine?.start(wait = false)
     }
 
+    /** Set before shutdown so in-flight and new MCP calls get a JSON-RPC error instead of a dropped connection. */
+    @Volatile var stopping = false
+
     fun stop() {
+        stopping = true
         running = false
-        engine?.stop(200, 2000)
+        engine?.stop(800, 2000)
         engine = null
     }
 }
