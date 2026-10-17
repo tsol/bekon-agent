@@ -45,17 +45,17 @@ class LinkControl(
     class Page(val status: Int, val html: String? = null, val jpeg: ByteArray? = null)
 
     private sealed class Act(val what: String) {
-        class Tap(val x: Int, val y: Int, label: String) : Act("tapped: ${label.take(80)}")
-        class Long(val x: Int, val y: Int, label: String) : Act("long-pressed: ${label.take(80)}")
-        class Type(val x: Int, val y: Int, label: String) : Act("typed into: ${label.take(80)}")
+        class Tap(val x: Int, val y: Int, label: String, val fp: UiNode? = null) : Act("tapped: ${label.take(80)}")
+        class Long(val x: Int, val y: Int, label: String, val fp: UiNode? = null) : Act("long-pressed: ${label.take(80)}")
+        class Type(val x: Int, val y: Int, label: String, val fp: UiNode? = null) : Act("typed into: ${label.take(80)}")
         class Swipe(val x1: Int, val y1: Int, val x2: Int, val y2: Int, val forward: Boolean, dir: String) : Act("scrolled $dir")
         class Nav(val action: String) : Act("nav $action")
         class Open(val pkg: String, label: String) : Act("opened: ${label.take(80)}")
-        class Highlight(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val label: String) :
+        class Highlight(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val label: String, val fp: UiNode? = null) :
             Act("highlighted: ${label.take(80)}")
-        class Arrow(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val label: String) :
+        class Arrow(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val label: String, val fp: UiNode? = null) :
             Act("pointed at: ${label.take(80)}")
-        class Hint(val x: Float, val y: Float, val text: String) : Act("showed hint")
+        class Hint(val x: Float, val y: Float, val text: String, val fp: UiNode? = null) : Act("showed hint")
         object Clear : Act("cleared highlights")
     }
 
@@ -231,20 +231,20 @@ class LinkControl(
                     if (n.checkable) sb.append(if (n.checked) " ✓" else " ○")
                     val b = n.bounds
                     if (b != null && b.size == 4) {
-                        val hl = put(token, Act.Highlight(b[0].toFloat(), b[1].toFloat(), b[2].toFloat(), b[3].toFloat(), n.label))
+                        val hl = put(token, Act.Highlight(b[0].toFloat(), b[1].toFloat(), b[2].toFloat(), b[3].toFloat(), n.label, n))
                         val ar = put(token, Act.Arrow(b[0].toFloat(), (b[1] - 120).toFloat().coerceAtLeast(0f),
-                            ((b[0] + b[2]) / 2f), ((b[1] + b[3]) / 2f), n.label))
-                        val hint = put(token, Act.Hint(((b[0] + b[2]) / 2f), b[1].toFloat(), ""))
+                            ((b[0] + b[2]) / 2f), ((b[1] + b[3]) / 2f), n.label, n))
+                        val hint = put(token, Act.Hint(((b[0] + b[2]) / 2f), b[1].toFloat(), "", n))
                         sb.append(" — coach: ")
                         sb.append(a("$base/do/$hl", "highlight")).append(" ")
                         sb.append(a("$base/do/$ar", "arrow")).append(" ")
                         sb.append(a("$base/do/$hint?text=" + enc("Look here: ${n.label.take(40)}"), "hint"))
                     }
                     if (!ro && n.enabled && (n.clickable || n.checkable)) {
-                        val tap = put(token, Act.Tap(n.x, n.y, n.label))
-                        val lp = put(token, Act.Long(n.x, n.y, n.label))
+                        val tap = put(token, Act.Tap(n.x, n.y, n.label, n))
+                        val lp = put(token, Act.Long(n.x, n.y, n.label, n))
                         sb.append(" — ").append(a("$base/do/$tap", "tap")).append(" ").append(a("$base/do/$lp", "long-press"))
-                        val ty = put(token, Act.Type(n.x, n.y, n.label))
+                        val ty = put(token, Act.Type(n.x, n.y, n.label, n))
                         sb.append(" ").append(a("$base/do/$ty?text=hello", "type?text="))
                     }
                     sb.append("</li>\n")
@@ -315,40 +315,50 @@ class LinkControl(
         if (gate?.isPaused() == true) return html(403, esc(ClientGate.PAUSED))
         return try {
             AgentConnections.busy {
+                // Re-find the element in a fresh tree: lists re-layout between snapshot and click.
+                val fp = when (act) { is Act.Tap -> act.fp; is Act.Long -> act.fp; is Act.Type -> act.fp
+                    is Act.Highlight -> act.fp; is Act.Arrow -> act.fp; is Act.Hint -> act.fp; else -> null }
+                val cur: UiNode? = if (fp != null) (refind(fp) ?: return@busy screen(token, note = "element moved/gone, pick again: ${fp.label.take(60)}")) else null
+                val cb = cur?.bounds
                 val before = if (act is Act.Tap || act is Act.Type || act is Act.Long) pageSig() else null
+                var extraNote = ""
                 when (act) {
-                    is Act.Tap -> executor.tap(act.x, act.y)
-                    is Act.Long -> executor.longPress(act.x, act.y)
+                    is Act.Tap -> if (cb == null || !nodeClick(cb, false)) executor.tap(cur?.x ?: act.x, cur?.y ?: act.y)
+                    is Act.Long -> if (cb == null || !nodeClick(cb, true)) executor.longPress(cur?.x ?: act.x, cur?.y ?: act.y)
                     is Act.Type -> {
                         // Ktor already URL-decodes query values; do not decode twice.
                         val text = query["text"] ?: ""
                         if (text.isEmpty()) return@busy screen(token, note = "type needs ?text=")
-                        executor.tap(act.x, act.y)
+                        if (cb == null || !nodeClick(cb, false)) executor.tap(cur?.x ?: act.x, cur?.y ?: act.y)
                         Thread.sleep(350) // focus lands; typeText waits up to 1.2 s more for an input-focused field
                         executor.typeText(text, replace = true, asKeys = false)
-                        if (query["enter"] == "1" || query["submit"] == "1") { Thread.sleep(150); executor.key("enter", 1) }
+                        if (query["enter"] == "1" || query["submit"] == "1") { Thread.sleep(200); extraNote = "; " + submit(cur ?: fp) }
                     }
                     is Act.Swipe -> scrollVerified(act)
                     is Act.Nav -> executor.nav(act.action)
                     is Act.Open -> { (apps ?: throw CapabilityException("apps not available")).open(act.pkg); waitForPackage(act.pkg) }
                     is Act.Highlight -> {
                         val c = coach ?: throw CapabilityException("coach: Gestures off")
-                        c.draw(listOf(Shape(Shape.Kind.BOX, act.x1, act.y1, act.x2, act.y2, act.label.take(40))), append = true)
+                        val bx = cb?.map { it.toFloat() } ?: listOf(act.x1, act.y1, act.x2, act.y2)
+                        c.draw(listOf(Shape(Shape.Kind.BOX, bx[0], bx[1], bx[2], bx[3], act.label.take(40))), append = true)
                     }
                     is Act.Arrow -> {
                         val c = coach ?: throw CapabilityException("coach: Gestures off")
-                        c.draw(listOf(Shape(Shape.Kind.ARROW, act.x1, act.y1, act.x2, act.y2, act.label.take(40))), append = true)
+                        val tx = cur?.x?.toFloat() ?: act.x2; val ty = cur?.y?.toFloat() ?: act.y2
+                        val sy = cb?.let { (it[1] - 120).toFloat().coerceAtLeast(0f) } ?: act.y1
+                        c.draw(listOf(Shape(Shape.Kind.ARROW, cb?.get(0)?.toFloat() ?: act.x1, sy, tx, ty, act.label.take(40))), append = true)
                     }
                     is Act.Hint -> {
                         val c = coach ?: throw CapabilityException("coach: Gestures off")
                         val text = (query["text"] ?: "").ifBlank { "Look here" }.take(80)
-                        c.draw(listOf(Shape(Shape.Kind.TEXT, act.x, act.y, act.x, act.y, text)), append = true)
+                        val hx = cur?.x?.toFloat() ?: act.x; val hy = cb?.get(1)?.toFloat() ?: act.y
+                        c.draw(listOf(Shape(Shape.Kind.TEXT, hx, hy, hx, hy, text)), append = true)
                     }
                     is Act.Clear -> coach?.clear()
                 }
                 if (act is Act.Tap || act is Act.Type || act is Act.Long) settleNav(before)
                 else if (!isCoach && act !is Act.Open && act !is Act.Swipe) settleQuiet()
-                screenWithin(token, act.what)
+                screenWithin(token, act.what + extraNote)
             }
         } catch (e: CapabilityException) {
             screen(token, note = e.message ?: "blocked")
@@ -448,6 +458,47 @@ class LinkControl(
     }
 
 
+
+    private fun nodeClick(b: IntArray, long: Boolean): Boolean = try { executor.clickNode(b, long) } catch (_: CapabilityException) { false }
+
+    /** Find [fp] in a fresh snapshot: same window, label, view id and class; nearest to its old position. */
+    private fun refind(fp: UiNode): UiNode? {
+        val snap = try { executor.snapshot() } catch (_: Exception) { return null }
+        return findFingerprint(prepareForLink(snap.items, snap.items.any { it.window == "ime" }), fp)
+    }
+
+    /**
+     * Submit after typing, verifying each method by a page change: IME action → IME key event → injected key →
+     * keyboard's enter key → a visible Search/Найти button. Returns which one worked for the note.
+     */
+    private fun submit(field: UiNode?): String {
+        var before = pageSig()
+        for (m in listOf("ime_action", "keys", "inject", "ime_key")) {
+            val acted = try { executor.enterVia(m) } catch (_: Exception) { false }
+            if (!acted) continue
+            if (waitChanged(before)) return "submitted via $m"
+            before = pageSig()
+        }
+        val snap = try { executor.snapshot() } catch (_: Exception) { null }
+        val btn = snap?.let { findSubmitButton(prepareForLink(it.items, false), field) }
+        if (btn != null) {
+            val b = btn.bounds
+            if (b == null || !nodeClick(b, false)) executor.tap(btn.x, btn.y)
+            if (waitChanged(before)) return "submitted via button: ${btn.label.take(40)}"
+        }
+        return "enter sent but page did not change (try tapping a suggestion or the search button)"
+    }
+
+    private fun waitChanged(before: Int): Boolean {
+        if (settleMs <= 0) return pageSig() != before
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < 1_500) {
+            Thread.sleep(250)
+            if (pageSig() != before) return true
+        }
+        return false
+    }
+
     /** Cheap page signature: foreground title + text/bounds of the snapshot. */
     private fun pageSig(): Int = try { sigOf(executor.foreground()["title"], executor.snapshot()) } catch (_: Exception) { 0 }
 
@@ -538,6 +589,18 @@ class LinkControl(
             }.let(::dropPieces)
 
         /** Drop plain text that is just a piece of a nearby actionable label (link "Name, description" then its parts). */
+        fun findFingerprint(items: List<UiNode>, fp: UiNode): UiNode? {
+            val c = items.filter { it.window == fp.window && it.label == fp.label && it.viewId == fp.viewId && it.cls == fp.cls }
+            return c.minByOrNull { (it.x - fp.x) * (it.x - fp.x) + (it.y - fp.y) * (it.y - fp.y) }
+        }
+
+        private val SUBMIT = Regex("""^(найти|искать|поиск|search|go|перейти|submit|отправить|send|ok)$""", RegexOption.IGNORE_CASE)
+
+        /** A visible actionable Search/Найти-like button, nearest to the field. */
+        fun findSubmitButton(items: List<UiNode>, field: UiNode?): UiNode? =
+            items.filter { (it.clickable) && it.window != "ime" && it.window != "system" && SUBMIT.matches(it.label.trim()) }
+                .minByOrNull { if (field == null) 0 else kotlin.math.abs(it.y - field.y) * 4 + kotlin.math.abs(it.x - field.x) }
+
         fun dropPieces(items: List<pro.potoki.bekon.agent.core.UiNode>): List<pro.potoki.bekon.agent.core.UiNode> {
             val out = ArrayList<pro.potoki.bekon.agent.core.UiNode>()
             for (n in items) {

@@ -307,6 +307,76 @@ class TouchController(private val svc: AccessibilityService) {
         return findEditable(root)
     }
 
+    private fun allRoots(types: Set<Int>? = null): List<AccessibilityNodeInfo> {
+        val wins = try { svc.windows } catch (_: Exception) { null }
+        val r = wins?.filter { types == null || it.type in types }?.mapNotNull { try { it.root } catch (_: Exception) { null } }
+        return if (r.isNullOrEmpty() && types == null) listOfNotNull(svc.rootInActiveWindow) else r ?: emptyList()
+    }
+
+    private fun bfs(roots: List<AccessibilityNodeInfo>, limit: Int = 4000, pick: (AccessibilityNodeInfo) -> Boolean): List<AccessibilityNodeInfo> {
+        val out = ArrayList<AccessibilityNodeInfo>()
+        val q = ArrayDeque<AccessibilityNodeInfo>(); roots.forEach { q.add(it) }
+        var n = 0
+        while (q.isNotEmpty() && n < limit) {
+            val x = q.removeFirst(); n++
+            if (pick(x)) out += x
+            for (i in 0 until x.childCount) x.getChild(i)?.let { q.add(it) }
+        }
+        return out
+    }
+
+    /** Click the node whose current screen bounds equal [b] (deepest match), or its nearest clickable ancestor. */
+    fun clickNode(b: IntArray, long: Boolean): Boolean {
+        if (b.size != 4) return false
+        val r = android.graphics.Rect()
+        val hits = bfs(allRoots()) { x -> x.getBoundsInScreen(r); r.left == b[0] && r.top == b[1] && r.right == b[2] && r.bottom == b[3] && x.isVisibleToUser }
+        val action = if (long) AccessibilityNodeInfo.ACTION_LONG_CLICK else AccessibilityNodeInfo.ACTION_CLICK
+        for (h in hits.asReversed()) {
+            var cur: AccessibilityNodeInfo? = h; var depth = 0
+            while (cur != null && depth < 6) {
+                if ((if (long) cur.isLongClickable else cur.isClickable) && cur.isEnabled) {
+                    val ok = cur.performAction(action)
+                    Log.i(TAG, "clickNode long=$long cls=${cur.className} ok=$ok")
+                    if (ok) return true
+                }
+                cur = cur.parent; depth++
+            }
+        }
+        return false
+    }
+
+    private val ENTER_WORDS = listOf("enter", "ввод", "search", "поиск", "найти", "искать", "go", "перейти", "готово", "done", "send", "отправить", "return")
+
+    fun enterVia(method: String): Boolean = when (method) {
+        "ime_action" -> {
+            val node = focusedEditable(300)
+            node != null && Build.VERSION.SDK_INT >= 30 && node.performAction(ACTION_IME_ENTER)
+        }
+        "keys" -> {
+            val ic = currentInputConnection()
+            ic != null && try {
+                onMain {
+                    val t = SystemClock.uptimeMillis()
+                    ic.sendKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER, 0)) &&
+                        ic.sendKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER, 0))
+                }
+            } catch (e: Exception) { Log.w(TAG, "keys enter: ${e.message}"); false }
+        }
+        "inject" -> injectKeyCode(KeyEvent.KEYCODE_ENTER)
+        "ime_key" -> {
+            val r = android.graphics.Rect()
+            val keys = bfs(allRoots(setOf(android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD))) { x ->
+                val s = ((x.contentDescription ?: "").toString() + " " + (x.text ?: "")).trim().lowercase()
+                s.isNotEmpty() && ENTER_WORDS.any { w -> s == w || s.startsWith("$w ") || s.endsWith(" $w") }
+            }
+            val k = keys.lastOrNull()
+            if (k == null) false
+            else if (k.isClickable && k.performAction(AccessibilityNodeInfo.ACTION_CLICK)) true
+            else { k.getBoundsInScreen(r); tap(r.exactCenterX(), r.exactCenterY()) }
+        }
+        else -> false
+    }
+
     /** Largest scrollable node across app windows (incl. WebView); ACTION_SCROLL_FORWARD/BACKWARD. */
     fun scroll(forward: Boolean): Boolean {
         var best: AccessibilityNodeInfo? = null; var bestArea = 0

@@ -352,4 +352,45 @@ class LinkControlDedupeTest {
         val p3 = links.handle("GET", "/s/$token/screen", mapOf("from" to "400"))!!.html!!
         assertTrue(p3.contains("Item 449") && !p3.contains("More elements"))
     }
+
+    private class Moving : ActionExecutor by Ex2() {
+        val calls = ArrayList<String>()
+        var items = listOf(
+            UiNode("a", "Хуахин", 300, 400, intArrayOf(0, 350, 1080, 450), true),
+            UiNode("b", "Хуан Карлос I", 300, 500, intArrayOf(0, 450, 1080, 550), true),
+        )
+        override fun snapshot() = ScreenSnapshot(1080, 2340, 270, 585, items)
+        override fun tap(x: Int, y: Int) = true.also { calls += "tap:$x,$y" }
+        override fun clickNode(bounds: IntArray, long: Boolean) = true.also { calls += "click:${bounds[1]}" }
+    }
+
+    @Test
+    fun `tap re-finds moved element and refuses when gone`() {
+        UserEvents.drain()
+        val ex = Moving()
+        val (links, token) = linkSession(ex)
+        val page = links.handle("GET", "/s/$token/screen", emptyMap())!!.html!!
+        val taps = Regex("""href="https://ex\.test(/s/$token/do/[^"]+)">tap""").findAll(page).map { it.groupValues[1] }.toList()
+        // list re-lays out: Хуахин moves down
+        ex.items = listOf(
+            UiNode("b", "Хуан Карлос I", 300, 400, intArrayOf(0, 350, 1080, 450), true),
+            UiNode("a", "Хуахин", 300, 500, intArrayOf(0, 450, 1080, 550), true),
+        )
+        links.handle("GET", taps[0], emptyMap())
+        assertEquals(listOf("click:450"), ex.calls) // clicked Хуахин at its NEW place
+        ex.items = listOf(UiNode("c", "Другое", 300, 400, intArrayOf(0, 350, 1080, 450), true))
+        val r = links.handle("GET", taps[1], emptyMap())!!.html!!
+        assertTrue(r.contains("element moved/gone"))
+        assertEquals(1, ex.calls.size)
+    }
+
+    @Test
+    fun `submit button finder prefers search label near field`() {
+        val field = UiNode("f", "Искать в Википедии", 400, 150, intArrayOf(0, 100, 900, 200), true)
+        val far = UiNode("x", "Найти", 500, 2000, intArrayOf(400, 1950, 600, 2050), true)
+        val near = UiNode("y", "Search", 980, 150, intArrayOf(920, 100, 1060, 200), true)
+        val text = UiNode("z", "Найти", 500, 1000, intArrayOf(400, 950, 600, 1050), false)
+        assertEquals("Search", LinkControl.findSubmitButton(listOf(field, far, near, text), field)!!.label)
+        assertEquals(null, LinkControl.findSubmitButton(listOf(field, text), field))
+    }
 }

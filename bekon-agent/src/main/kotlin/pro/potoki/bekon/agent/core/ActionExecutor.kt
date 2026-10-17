@@ -106,6 +106,10 @@ interface ActionExecutor {
     fun foreground(): Map<String, String> = emptyMap()
     /** Scroll the largest scrollable container; forward = reveal content further down. False if none handled it. */
     fun scroll(forward: Boolean): Boolean = false
+    /** ACTION_CLICK / ACTION_LONG_CLICK on the node at exactly [bounds] (or its clickable ancestor). False = use a gesture. */
+    fun clickNode(bounds: IntArray, long: Boolean): Boolean = false
+    /** One submit method: "ime_action" (ACTION_IME_ENTER), "keys" (IME InputConnection ENTER), "inject", "ime_key" (keyboard's enter key). */
+    fun enterVia(method: String): Boolean = if (method == "ime_action") key("enter", 1) else false
 }
 
 /** Counter of meaningful accessibility events (own overlay and status-bar ticks excluded). */

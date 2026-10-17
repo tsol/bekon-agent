@@ -168,6 +168,12 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
     override fun scroll(forward: Boolean): Boolean =
         (writer() ?: throw CapabilityException("touch: accessibility service not enabled")).scroll(forward)
 
+    override fun clickNode(bounds: IntArray, long: Boolean): Boolean =
+        (writer() ?: throw CapabilityException("touch: accessibility service not enabled")).clickNode(bounds, long)
+
+    override fun enterVia(method: String): Boolean =
+        (writer() ?: throw CapabilityException("touch: accessibility service not enabled")).enterVia(method)
+
     override fun key(name: String, n: Int): Boolean =
         writer()?.key(name, n) ?: throw CapabilityException("touch: accessibility service not enabled")
 
