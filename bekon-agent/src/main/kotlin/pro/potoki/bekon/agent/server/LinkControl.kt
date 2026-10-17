@@ -75,7 +75,7 @@ class LinkControl(
             path == "/link/wait" -> return wait(query["ticket"] ?: "")
             path.matches(Regex("""^/s/[^/]+/screen/?$""")) -> {
                 val tok = path.split('/')[2]
-                return screen(tok, note = query["note"])
+                return screen(tok, note = query["note"], from = query["from"]?.toIntOrNull() ?: 0)
             }
             path.matches(Regex("""^/s/[^/]+/apps/?$""")) -> return appsPage(path.split('/')[2])
             path.matches(Regex("""^/s/[^/]+/open/?$""")) -> return openUrl(path.split('/')[2], query["url"] ?: "")
@@ -161,7 +161,7 @@ class LinkControl(
         return id
     }
 
-    private fun screen(token: String, note: String? = null, usedStale: Boolean = false): Page {
+    private fun screen(token: String, note: String? = null, usedStale: Boolean = false, from: Int = 0): Page {
         if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start?client=…")
         return try {
             AgentConnections.busy {
@@ -207,10 +207,13 @@ class LinkControl(
                     sb.append(" · scroll ").append(a("$base/do/$down", "down")).append(" / ").append(a("$base/do/$up", "up"))
                     sb.append("</p>\n")
                     sb.append("<p>Open a website: <code>${esc(base)}/open?url=https://…</code> (http/https only). ")
-                    sb.append("Type into a field: its <i>type?text=</i> link; add <code>&amp;enter=1</code> to submit.</p>\n")
+                    sb.append("Type into a field: its <i>type?text=</i> link; append the extra parameter <code>enter=1</code> (example: ...?text=hello and enter=1, joined with an ampersand) to submit.</p>\n")
                 }
                 sb.append("<h2>Elements</h2>\n<ul>\n")
-                val visible = items.filter { it.window != "ime" }
+                val allVisible = items.filter { it.window != "ime" }
+                val start = from.coerceIn(0, maxOf(0, allVisible.size - 1))
+                val visible = allVisible.drop(start).take(PAGE_SIZE)
+                if (start > 0) sb.append("<li>").append(a("$base/screen", "↑ first elements")).append(" (showing ${start + 1}–${start + visible.size} of ${allVisible.size})</li>\n")
                 if (imeOpen) {
                     sb.append("<li><b>[keyboard]</b> Keyboard is open — type with type?text= on a field")
                     if (!ro) {
@@ -247,6 +250,10 @@ class LinkControl(
                     sb.append("</li>\n")
                 }
                 sb.append("</ul>\n")
+                if (start + visible.size < allVisible.size) {
+                    sb.append("<p>").append(a("$base/screen?from=${start + visible.size}", "More elements"))
+                        .append(" (${allVisible.size - start - visible.size} more; ${start + visible.size} of ${allVisible.size} shown)</p>\n")
+                }
                 sb.append("<p><small>One-shot links. Stale/reuse shows this page with no action. Stop on the phone ends the token.</small></p>\n")
                 sb.append("<script>(function(){var i=document.getElementById('shot');if(!i)return;setTimeout(function(){i.src='${esc(shotUrl)}&r=1';},800);})();</script>\n")
                 sb.append("</body></html>")
@@ -308,6 +315,7 @@ class LinkControl(
         if (gate?.isPaused() == true) return html(403, esc(ClientGate.PAUSED))
         return try {
             AgentConnections.busy {
+                val before = if (act is Act.Tap || act is Act.Type || act is Act.Long) pageSig() else null
                 when (act) {
                     is Act.Tap -> executor.tap(act.x, act.y)
                     is Act.Long -> executor.longPress(act.x, act.y)
@@ -320,7 +328,7 @@ class LinkControl(
                         executor.typeText(text, replace = true, asKeys = false)
                         if (query["enter"] == "1" || query["submit"] == "1") { Thread.sleep(150); executor.key("enter", 1) }
                     }
-                    is Act.Swipe -> (try { executor.scroll(act.forward) } catch (_: CapabilityException) { false }) || executor.swipe(act.x1, act.y1, act.x2, act.y2, 350)
+                    is Act.Swipe -> scrollVerified(act)
                     is Act.Nav -> executor.nav(act.action)
                     is Act.Open -> { (apps ?: throw CapabilityException("apps not available")).open(act.pkg); waitForPackage(act.pkg) }
                     is Act.Highlight -> {
@@ -338,8 +346,9 @@ class LinkControl(
                     }
                     is Act.Clear -> coach?.clear()
                 }
-                if (!isCoach) settleQuiet()
-                screen(token, note = act.what)
+                if (act is Act.Tap || act is Act.Type || act is Act.Long) settleNav(before)
+                else if (!isCoach && act !is Act.Open && act !is Act.Swipe) settleQuiet()
+                screenWithin(token, act.what)
             }
         } catch (e: CapabilityException) {
             screen(token, note = e.message ?: "blocked")
@@ -420,8 +429,8 @@ class LinkControl(
         return try {
             AgentConnections.busy {
                 (apps ?: throw CapabilityException("open url not available")).openUrl(url)
-                settleQuiet(debounceMs = 700, maxMs = 3_500)
-                screen(token, note = "opened: " + url.take(100))
+                settleQuiet(debounceMs = 700, maxMs = 3_000)
+                screenWithin(token, "opened: " + url.take(100))
             }
         } catch (e: CapabilityException) { screen(token, note = e.message ?: "blocked") }
         catch (e: Exception) { screen(token, note = e.message ?: "error") }
@@ -434,8 +443,55 @@ class LinkControl(
             if (executor.foreground()["package"] == pkg) break
             Thread.sleep(80)
         }
-        val left = (3_500 - (System.currentTimeMillis() - start)).coerceAtLeast(600)
+        val left = (3_000 - (System.currentTimeMillis() - start)).coerceAtLeast(600)
         settleQuiet(debounceMs = 600, maxMs = left)
+    }
+
+
+    /** Cheap page signature: foreground title + text/bounds of the snapshot. */
+    private fun pageSig(): Int = try {
+        val fg = executor.foreground()
+        val snap = executor.snapshot()
+        31 * (fg["title"] ?: "").hashCode() + snap.items.joinToString("|") { it.label + it.bounds?.joinToString(",") }.hashCode()
+    } catch (_: Exception) { 0 }
+
+    /** Scroll action first; if the page did not change (WebView often reports success and stays put), swipe 75%→25%. */
+    private fun scrollVerified(act: Act.Swipe): Boolean {
+        val before = pageSig()
+        val acted = try { executor.scroll(act.forward) } catch (_: CapabilityException) { false }
+        if (acted) {
+            Thread.sleep(450)
+            if (pageSig() != before) { settleQuiet(debounceMs = 300, maxMs = 1_200); return true }
+        }
+        val ok = executor.swipe(act.x1, act.y1, act.x2, act.y2, 350)
+        settleQuiet(debounceMs = 350, maxMs = 1_500)
+        return ok
+    }
+
+    /**
+     * After a tap that may navigate (web links): wait for a real change (title/content) and a quiet period,
+     * and for a visible progress bar to go away; max ~4 s.
+     */
+    private fun settleNav(before: Int?) {
+        if (settleMs <= 0) return // unit tests
+        val start = System.currentTimeMillis()
+        settleQuiet(debounceMs = 600, maxMs = 1_500)
+        while (System.currentTimeMillis() - start < NAV_SETTLE_MS) {
+            val changed = before == null || pageSig() != before
+            val loading = try { executor.snapshot().items.any { (it.cls ?: "").contains("ProgressBar") && it.pkg == executor.foreground()["package"] } } catch (_: Exception) { false }
+            if (changed && !loading) break
+            Thread.sleep(250)
+            settleQuiet(debounceMs = 400, maxMs = 800)
+        }
+    }
+
+    /** Build the screen page but never let a slow snapshot stall the HTTP response (tunnels time out). */
+    private fun screenWithin(token: String, note: String): Page {
+        val f = java.util.concurrent.CompletableFuture.supplyAsync { screen(token, note = note) }
+        return try { f.get(RESPONSE_BUDGET_MS, java.util.concurrent.TimeUnit.MILLISECONDS) }
+        catch (_: java.util.concurrent.TimeoutException) {
+            html(200, "<p><b>${esc(note)}</b></p><p>Done. The screen is still loading — " + a(abs("/s/$token/screen"), "Refresh") + ".</p>")
+        }
     }
 
     /** Wait until accessibility goes quiet (~debounceMs) or maxMs elapses, then the next snapshot/shot is fresh. */
@@ -461,6 +517,10 @@ class LinkControl(
     private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
     private fun html(code: Int, body: String) = Page(code, "<!doctype html><html><head><meta charset=utf-8></head><body>$body</body></html>")
     companion object {
+        const val PAGE_SIZE = 200
+        private const val NAV_SETTLE_MS = 4_000L
+        private const val RESPONSE_BUDGET_MS = 5_000L
+        private val ID_NAME = Regex("""^(button|field|image|toggle|dropdown|control)( \(id: [^)]*\))?$""")
         private val NAV_LABELS = setOf(
             "назад", "back", "домой", "home", "последние", "recents", "recent apps", "overview",
         )
@@ -473,7 +533,26 @@ class LinkControl(
                 if (n.window == "ime") return@mapNotNull null
                 val lab = polishLabel(n) ?: return@mapNotNull null
                 if (lab == n.label) n else n.copy(label = lab)
+            }.let(::dropPieces)
+
+        /** Drop plain text that is just a piece of a nearby actionable label (link "Name, description" then its parts). */
+        fun dropPieces(items: List<pro.potoki.bekon.agent.core.UiNode>): List<pro.potoki.bekon.agent.core.UiNode> {
+            val out = ArrayList<pro.potoki.bekon.agent.core.UiNode>()
+            for (n in items) {
+                val k = n.label.trim().lowercase()
+                if (!n.clickable && !n.checkable && k.length >= 2) {
+                    val nb = n.bounds
+                    val dup = out.takeLast(8).any { p ->
+                        (p.clickable || p.checkable) && p.window == n.window && p.label.lowercase().contains(k) &&
+                            p.bounds != null && nb != null && nb.size == 4 && p.bounds.size == 4 &&
+                            nb[0] < p.bounds[2] && p.bounds[0] < nb[2] && nb[1] < p.bounds[3] && p.bounds[1] < nb[3]
+                    }
+                    if (dup) continue
+                }
+                out += n
             }
+            return out
+        }
 
         fun dedupe(items: List<pro.potoki.bekon.agent.core.UiNode>): List<pro.potoki.bekon.agent.core.UiNode> {
             fun key(n: pro.potoki.bekon.agent.core.UiNode) = n.label.trim().lowercase()
@@ -549,8 +628,13 @@ class LinkControl(
         /** Null => omit from the link list. */
         fun polishLabel(n: pro.potoki.bekon.agent.core.UiNode): String? {
             var lab = n.label.trim()
-            if (lab.isEmpty() || lab == "(unnamed)" || lab.equals("clickable", ignoreCase = true)) {
-                lab = pro.potoki.bekon.agent.core.NodeNameResolver.fromIdClass(n.viewId, n.cls) ?: return null
+            val actionable = n.clickable || n.checkable
+            if (lab.isEmpty() || lab == "(unnamed)" || lab.equals("clickable", ignoreCase = true) || ID_NAME.matches(lab)) {
+                // Names from view-id/class only: never for plain (non-actionable) nodes; web ids carry no meaning.
+                if (!actionable) return null
+                val webId = n.viewId != null && !n.viewId.contains(":id/")
+                lab = pro.potoki.bekon.agent.core.NodeNameResolver.fromIdClass(if (webId) null else n.viewId, n.cls)
+                    ?: return null
             }
             if (lab.length > 120) lab = lab.take(117).trimEnd() + "…"
             return lab

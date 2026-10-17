@@ -18,7 +18,10 @@ object A11yDump {
     private const val TAG = "A11yDump"
     const val PREFS_DUMP = "a11y_dump"
     private const val PREFS_NAME = "wlya_prefs"
-    private const val MAX_NODES = 1000
+    private const val MAX_NODES = 2500
+    /** Long web pages: stop walking after this so a request never hangs the tunnel. */
+    private const val WALK_BUDGET_MS = 2_000L
+    @Volatile private var deadline = Long.MAX_VALUE
     private const val MAX_TEXT = 200
 
     fun isDumpEnabled(ctx: Context): Boolean = true
@@ -70,6 +73,7 @@ object A11yDump {
     private fun dumpOnService(svc: TouchService?): String? {
         if (svc == null) return null
         val out = JSONArray()
+        deadline = android.os.SystemClock.uptimeMillis() + WALK_BUDGET_MS
         try {
             val windows = svc.windows
             val sbH = statusBarHeight(svc)
@@ -136,6 +140,7 @@ object A11yDump {
 
     private fun walk(node: AccessibilityNodeInfo, out: JSONArray, sbH: Int, winType: String) {
         if (out.length() >= MAX_NODES) return
+        if (android.os.SystemClock.uptimeMillis() > deadline) return
         // Never ship password contents off the device.
         val text = if (node.isPassword) (if (node.text.isNullOrEmpty()) null else "[password hidden]") else clip(node.text?.toString())
         val desc = clip(node.contentDescription?.toString())

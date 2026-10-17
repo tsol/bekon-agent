@@ -318,4 +318,38 @@ class LinkControlDedupeTest {
         val r = links.handle("GET", "/s/$token/open", mapOf("url" to "https://example.org/"))!!.html!!
         assertTrue(r.contains("Read-only")); assertTrue(opened.isEmpty())
     }
+
+    @Test
+    fun `id-only names dropped for plain nodes, web ids stripped, pieces of link dropped`() {
+        val bar = n("a", "control (id: action_bar_root)", 0, 0, 1080, 2340, window = "application")
+        val hair = n("h", "image (id: toolbar_hairline)", 0, 200, 1080, 202, window = "application")
+        val webBtn = n("w", "", 900, 300, 1000, 400, clickable = true, window = "application").copy(viewId = "searchButton", cls = "android.widget.Button")
+        val link = n("l", "Харингтон, Кит английский актёр", 0, 500, 1080, 640, clickable = true, window = "application")
+        val p1 = n("p1", "Харингтон, Кит", 40, 510, 600, 560, window = "application")
+        val p2 = n("p2", "английский актёр", 40, 570, 600, 620, window = "application")
+        val other = n("o", "Харингтон, Кит", 40, 1500, 600, 1560, window = "application")
+        val out = LinkControl.prepareForLink(listOf(bar, hair, webBtn, link, p1, p2, other), imeOpen = false)
+        val labels = out.map { it.label }
+        assertTrue(labels.none { it.contains("action_bar_root") || it.contains("toolbar_hairline") })
+        assertTrue(labels.contains("button"))
+        assertEquals(1, labels.count { it == "Харингтон, Кит английский актёр" })
+        assertTrue(labels.none { it == "Харингтон, Кит" }) // piece (and its same-window text twin) dropped
+        assertTrue(labels.none { it == "английский актёр" })
+    }
+
+    @Test
+    fun `hint line has no html entity and long pages paginate`() {
+        UserEvents.drain()
+        val many = (0 until 450).map { UiNode("n$it", "Item $it", 100, 10 + it * 5, intArrayOf(0, it * 5, 500, it * 5 + 4), true) }
+        val ex = object : ActionExecutor by Ex2() {
+            override fun snapshot() = ScreenSnapshot(1080, 2340, 270, 585, many)
+        }
+        val (links, token) = linkSession(ex)
+        val p1 = links.handle("GET", "/s/$token/screen", emptyMap())!!.html!!
+        assertTrue(!p1.contains("&amp;enter"))
+        assertTrue(p1.contains("Item 199") && !p1.contains("Item 200<"))
+        assertTrue(p1.contains("/screen?from=200"))
+        val p3 = links.handle("GET", "/s/$token/screen", mapOf("from" to "400"))!!.html!!
+        assertTrue(p3.contains("Item 449") && !p3.contains("More elements"))
+    }
 }
