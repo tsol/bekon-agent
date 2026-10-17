@@ -703,7 +703,9 @@ class LinkControl(
             fun better(a: pro.potoki.bekon.agent.core.UiNode, b: pro.potoki.bekon.agent.core.UiNode): pro.potoki.bekon.agent.core.UiNode {
                 if (a.clickable != b.clickable) return if (a.clickable) a else b
                 if (a.checkable != b.checkable) return if (a.checkable) a else b
-                return if (area(a.bounds) >= area(b.bounds)) a else b
+                // Same clickability: the smaller node is the precise target (a list container named after its first row
+                // has the same text but its center lands on another row — 1.0.25 tapped "Хуан Карлос I" for "Хуахин").
+                return if (area(a.bounds) <= area(b.bounds)) a else b
             }
             val src = items.filter(::informative)
             val kept = ArrayList<pro.potoki.bekon.agent.core.UiNode>()
@@ -727,7 +729,12 @@ class LinkControl(
                         kept[i] = better(k, n).let { win ->
                             val w = listOfNotNull(k.window, n.window).firstOrNull { it != "application" } ?: win.window
                             val lab = if (win.label.isBlank()) (if (k.label.isNotBlank()) k.label else n.label) else win.label
-                            win.copy(window = w, label = lab)
+                            val small = if (area(k.bounds) <= area(n.bounds)) k else n
+                            val big = if (small === k) n else k
+                            // Clickable container + same-text inner node: keep the action, but tap the inner node's spot.
+                            val pin = sameText && win === big && area(big.bounds) >= 4 * maxOf(1, area(small.bounds))
+                            if (pin) win.copy(window = w, label = lab, bounds = small.bounds, x = small.x, y = small.y)
+                            else win.copy(window = w, label = lab)
                         }
                         merged = true
                         break

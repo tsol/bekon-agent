@@ -431,4 +431,19 @@ class LinkControlDedupeTest {
         assertEquals("z", LinkControl.findFingerprint(list, a.copy(ref = "#2"))!!.ref)
         assertEquals("x", LinkControl.findFingerprint(list, a.copy(ref = "#7"))!!.ref) // out of range -> nearest
     }
+
+    @Test
+    fun `list container named after first row does not steal the tap point`() {
+        // Chrome: clickable suggestion list (label resolved from its first row) + the clickable first row.
+        val list = UiNode("L", "Хуахин", 540, 1300, intArrayOf(0, 400, 1080, 2200), true, cls = "android.view.View")
+        val row = UiNode("r", "Хуахин", 540, 460, intArrayOf(0, 400, 1080, 520), true, cls = "android.view.View")
+        val other = UiNode("o", "Хуан Карлос I король Испании", 540, 1300, intArrayOf(0, 1240, 1080, 1360), true, cls = "android.view.View")
+        val out = LinkControl.prepareForLink(listOf(list, row, other), imeOpen = false)
+        val h = out.single { it.label == "Хуахин" }
+        assertEquals(460, h.y)
+        // and a non-clickable inner text under a clickable container pins the tap to the text
+        val txt = row.copy(clickable = false)
+        val h2 = LinkControl.prepareForLink(listOf(list, txt, other), imeOpen = false).single { it.label == "Хуахин" }
+        assertEquals(460, h2.y); assertTrue(h2.clickable)
+    }
 }
