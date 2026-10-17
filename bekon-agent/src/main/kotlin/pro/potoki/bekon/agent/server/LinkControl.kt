@@ -500,46 +500,62 @@ class LinkControl(
      * Submit after typing, verifying each method by a page change: IME action → IME key event → injected key →
      * keyboard's enter key → a visible Search/Найти button. Returns which one worked for the note.
      */
+    /** Navigation signature: page title + editable fields (URL bar / search box). Lazy-loaded content doesn't count. */
+    private fun navSig(): Int = try {
+        val snap = executor.snapshot()
+        31 * (executor.foreground()["title"] ?: "").hashCode() + snap.items.filter { it.editable }.joinToString("|") { it.label }.hashCode()
+    } catch (_: Exception) { 0 }
+
     private fun submit(field: UiNode?, typed: String): String {
-        var before = pageSig()
+        // Verified by navigation (title / URL bar / search box), not by images loading in.
+        var before = navSig()
         for (m in listOf("ime_action", "keys", "inject", "ime_key")) {
             val acted = try { executor.enterVia(m) } catch (_: Exception) { false }
             if (!acted) continue
-            if (waitChanged(before)) return "submitted via $m"
-            before = pageSig()
+            if (waitChanged(before, ::navSig)) return "submitted via $m"
+            before = navSig()
         }
         // Keyboard may have closed after SET_TEXT: touch the field to bring it back, then press its enter key.
-        if (field != null) {
-            val f = refind(field) ?: field
+        // Only touch a field that is really there now (the tapped box is often replaced by a search overlay;
+        // its old coordinates then land on a suggestion — 1.0.27 opened "Харингтон, Кит" that way).
+        val f = (if (field != null) refind(field) else null) ?: currentField(typed)
+        if (f != null) {
             executor.tap(f.x, f.y)
             Thread.sleep(if (settleMs <= 0) 0 else 700)
-            before = pageSig()
-            if ((try { executor.enterVia("ime_key") } catch (_: Exception) { false }) && waitChanged(before)) return "submitted via keyboard enter key"
-            before = pageSig()
+            before = navSig()
+            if ((try { executor.enterVia("ime_key") } catch (_: Exception) { false }) && waitChanged(before, ::navSig)) return "submitted via keyboard enter key"
+            before = navSig()
         }
         val snap = try { executor.snapshot() } catch (_: Exception) { null }
         val prepared = snap?.let { prepareForLink(it.items, false) }
         val phrase = prepared?.let { findSearchPhrase(it, typed) }
         if (phrase != null) {
             executor.tap(phrase.x, phrase.y)
-            if (waitChanged(before)) return "submitted via: ${phrase.label.take(50)}"
-            before = pageSig()
+            if (waitChanged(before, ::navSig)) return "submitted via: ${phrase.label.take(50)}"
+            before = navSig()
         }
         val btn = prepared?.let { findSubmitButton(it, field) }
         if (btn != null) {
             val b = btn.bounds
             if (b == null || !nodeClick(b, false)) executor.tap(btn.x, btn.y)
-            if (waitChanged(before)) return "submitted via button: ${btn.label.take(40)}"
+            if (waitChanged(before, ::navSig)) return "submitted via button: ${btn.label.take(40)}"
         }
         return "enter sent but page did not change (try tapping a suggestion or the search button)"
     }
 
-    private fun waitChanged(before: Int): Boolean {
-        if (settleMs <= 0) return pageSig() != before
+    /** The editable field that now holds [typed] (or the only editable in an app window). */
+    private fun currentField(typed: String): UiNode? {
+        val snap = try { executor.snapshot() } catch (_: Exception) { return null }
+        val eds = prepareForLink(snap.items, false).filter { it.editable && (it.window == null || it.window == "application" || it.window == "popup") }
+        return eds.firstOrNull { it.label.trim() == typed.trim() } ?: eds.singleOrNull()
+    }
+
+    private fun waitChanged(before: Int, sig: () -> Int = ::pageSig): Boolean {
+        if (settleMs <= 0) return sig() != before
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < 1_500) {
             Thread.sleep(250)
-            if (pageSig() != before) return true
+            if (sig() != before) return true
         }
         return false
     }
@@ -634,7 +650,9 @@ class LinkControl(
             }.let(::dropPieces)
 
         /** Drop plain text that is just a piece of a nearby actionable label (link "Name, description" then its parts). */
-        fun fpKey(n: UiNode) = listOf(n.window, n.label, n.viewId, n.cls, n.editable).joinToString("\u0000")
+        /** App windows flip between "application" and "popup" as focus moves (overlays, IME): treat them alike. */
+        private fun winGroup(w: String?) = when (w) { null, "application", "popup" -> "app"; else -> w }
+        fun fpKey(n: UiNode) = listOf(winGroup(n.window), n.label, n.viewId, n.cls, n.editable).joinToString("\u0000")
 
         /** Same window/label/id/class/editable; the ordinal among those decides between duplicates, else nearest. */
         fun findFingerprint(items: List<UiNode>, fp: UiNode): UiNode? {
@@ -642,7 +660,10 @@ class LinkControl(
             val c = items.filter { fpKey(it) == k }
             val ord = fp.ref.removePrefix("#").toIntOrNull()
             if (ord != null && fp.ref.startsWith("#") && ord < c.size) return c[ord]
-            return c.minByOrNull { (it.x - fp.x) * (it.x - fp.x) + (it.y - fp.y) * (it.y - fp.y) }
+            c.minByOrNull { (it.x - fp.x) * (it.x - fp.x) + (it.y - fp.y) * (it.y - fp.y) }?.let { return it }
+            // Loose: same label + class + editable (view ids of web nodes are not stable), unique or nearest.
+            val loose = items.filter { it.label == fp.label && it.cls == fp.cls && it.editable == fp.editable }
+            return loose.minByOrNull { (it.x - fp.x) * (it.x - fp.x) + (it.y - fp.y) * (it.y - fp.y) }
         }
 
         private val BROWSERS = setOf("com.android.chrome", "com.chrome.beta", "com.sec.android.app.sbrowser", "org.mozilla.firefox",
@@ -707,6 +728,12 @@ class LinkControl(
                 // has the same text but its center lands on another row — 1.0.25 tapped "Хуан Карлос I" for "Хуахин").
                 return if (area(a.bounds) <= area(b.bounds)) a else b
             }
+            // Icon button with its caption right under it (bottom bars): same text, columns overlap, ≤ 48 px gap.
+            fun stacked(a: IntArray, b: IntArray): Boolean {
+                val hOverlap = minOf(a[2], b[2]) - maxOf(a[0], b[0]) > minOf(a[2] - a[0], b[2] - b[0]) / 2
+                val gap = maxOf(a[1], b[1]) - minOf(a[3], b[3])
+                return hOverlap && gap in -1..48
+            }
             val src = items.filter(::informative)
             val kept = ArrayList<pro.potoki.bekon.agent.core.UiNode>()
             for (n in src) {
@@ -717,7 +744,7 @@ class LinkControl(
                     val kb = k.bounds
                     val sameText = key(n).isNotEmpty() && key(n) == key(k)
                     val nest = nb != null && kb != null && nb.size == 4 && kb.size == 4 &&
-                        (contains(kb, nb) || contains(nb, kb) || (sameText && overlaps(kb, nb)))
+                        (contains(kb, nb) || contains(nb, kb) || (sameText && (overlaps(kb, nb) || (stacked(kb, nb) && !n.editable && !k.editable && !(n.clickable && k.clickable)))))
                     // Merge only true duplicates: same text overlapping, or an unlabeled container around a labeled child.
                     // (1.0.20 merged ANY nested pair, so a big WebView/list swallowed all page text, links and fields.)
                     // Unlabeled wrapper absorbs a labeled child only when it is about the child's size (icon button +
@@ -776,6 +803,8 @@ class LinkControl(
                 val webId = n.viewId != null && !n.viewId.contains(":id/")
                 lab = pro.potoki.bekon.agent.core.NodeNameResolver.fromIdClass(if (webId) null else n.viewId, n.cls)
                     ?: return null
+                // "control (id: divider_line_id)": unknown class + layout id is never something to tap.
+                if (lab.startsWith("control")) return null
             }
             if (isJunkLabel(lab, n)) return null
             if (lab.length > 120) lab = lab.take(117).trimEnd() + "…"

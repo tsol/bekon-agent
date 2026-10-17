@@ -460,4 +460,25 @@ class LinkControlDedupeTest {
         assertEquals(listOf("Бангкока", "+"), out.map { it.label })
         assertEquals(600, out[0].y)
     }
+
+    @Test
+    fun `stacked icon and caption merge, id-only controls dropped`() {
+        val icon = UiNode("i", "Pause", 200, 1990, intArrayOf(140, 1940, 260, 2040), true)
+        val cap = UiNode("c", "Pause", 200, 2150, intArrayOf(150, 2060, 250, 2120), false)
+        val div = UiNode("d", "", 540, 900, intArrayOf(0, 898, 1080, 902), true, viewId = "com.android.chrome:id/divider_line_id", cls = "android.view.View")
+        val btn = UiNode("b", "", 540, 500, intArrayOf(500, 460, 580, 540), true, viewId = "com.x:id/send", cls = "android.widget.ImageButton")
+        val out = LinkControl.prepareForLink(listOf(icon, cap, div, btn), imeOpen = false)
+        assertEquals(setOf("Pause", "button (id: send)"), out.map { it.label }.toSet()); assertEquals(2, out.size)
+    }
+
+    @Test
+    fun `suggestion right under a same-text field is not merged into it`() {
+        val field = UiNode("f", "Хуахин", 400, 150, intArrayOf(0, 100, 900, 200), true, editable = true)
+        val row = UiNode("r", "Хуахин", 540, 260, intArrayOf(0, 220, 1080, 300), true)
+        val rowText = UiNode("t", "Хуахин", 300, 260, intArrayOf(150, 230, 500, 290), false)
+        val out = LinkControl.prepareForLink(listOf(field, row, rowText), imeOpen = false)
+        assertEquals(2, out.size)
+        assertTrue(out.all { it.clickable })
+        assertEquals(1, out.count { it.editable })
+    }
 }
