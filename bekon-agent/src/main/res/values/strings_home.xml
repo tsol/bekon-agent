@@ -88,4 +88,14 @@
     <string name="verb_enable">Turn on</string>
     <string name="verb_open">Open</string>
     <string name="verb_i_did">I did it</string>
+    <string name="capture_lost_body">Screen sharing is off — turn it back on</string>
+    <string name="capture_lost_verb">Turn on again</string>
+    <string name="dot_session_on">Screen sharing — on</string>
+    <string name="dot_session_off">Screen sharing — off</string>
+    <string name="dot_notif_on">Notifications — on</string>
+    <string name="dot_notif_off">Notifications — off</string>
+    <string name="dot_restricted_on">Restricted settings — unlocked</string>
+    <string name="dot_restricted_off">Restricted settings — locked</string>
+    <string name="dot_a11y_on">Gestures — on</string>
+    <string name="dot_a11y_off">Gestures — off</string>
 </resources>

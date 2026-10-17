@@ -33,6 +33,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -120,11 +124,12 @@ private fun ConnectionCard(
                     Text(stringResource(R.string.conn_missing, stringResource(coreTitle(current))),
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     StepDots(core, ok)
-                    if (state.isRunning || state.phase == SessionPhase.STARTING) StopButton({ onIntent(HomeIntent.Stop) }, Modifier.fillMaxWidth())
+                    // Any running session (e.g. tunnel + gestures on but capture lost) keeps a one-tap Stop.
+                    if (state.sessionActive) StopButton({ onIntent(HomeIntent.Stop) }, Modifier.fillMaxWidth())
                 }
                 ConnState.READY, ConnState.DISCONNECTED -> {
                     if (!state.publicUrl.isNullOrBlank()) ShareButtons(state.publicUrl, onShowQr, { onIntent(HomeIntent.Stop) })
-                    else StopButton({ onIntent(HomeIntent.Stop) }, Modifier.fillMaxWidth())
+                    else if (state.sessionActive) StopButton({ onIntent(HomeIntent.Stop) }, Modifier.fillMaxWidth())
                 }
                 ConnState.CONNECTED -> {
                     // Play policy: always-visible remote-session indicator with one-tap Stop.
@@ -146,12 +151,21 @@ private fun ConnectionCard(
 @Composable
 private fun StepDots(core: List<CoreStep>, ok: (CoreStep) -> Boolean) {
     val green = androidx.compose.ui.graphics.Color(0xFF1E8E3E)
+    val ctx = LocalContext.current
     var currentSeen = false
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    // Each dot sits in a 48dp tap target; tap explains the step and its state (also read by TalkBack).
+    Row(verticalAlignment = Alignment.CenterVertically) {
         core.forEach { c ->
             val done = ok(c)
             val isCurrent = !done && !currentSeen
             if (isCurrent) currentSeen = true
+            val label = stringResource(dotLabel(c, done))
+            androidx.compose.foundation.layout.Box(
+                Modifier.size(48.dp)
+                    .semantics { contentDescription = label; role = androidx.compose.ui.semantics.Role.Button }
+                    .clickable { Toast.makeText(ctx, label, Toast.LENGTH_SHORT).show() },
+                contentAlignment = Alignment.Center,
+            ) {
             androidx.compose.foundation.layout.Box(
                 Modifier.size(24.dp).then(
                     when {
@@ -164,8 +178,16 @@ private fun StepDots(core: List<CoreStep>, ok: (CoreStep) -> Boolean) {
             ) {
                 if (done) Text("✓", color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.labelLarge)
             }
+            }
         }
     }
+}
+
+private fun dotLabel(c: CoreStep, done: Boolean) = when (c) {
+    CoreStep.SESSION -> if (done) R.string.dot_session_on else R.string.dot_session_off
+    CoreStep.NOTIFICATIONS -> if (done) R.string.dot_notif_on else R.string.dot_notif_off
+    CoreStep.RESTRICTED -> if (done) R.string.dot_restricted_on else R.string.dot_restricted_off
+    CoreStep.A11Y, CoreStep.READY -> if (done) R.string.dot_a11y_on else R.string.dot_a11y_off
 }
 
 /** One step: short title, one sentence, one filled primary button with a verb. */
@@ -185,8 +207,11 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
     Card(Modifier.fillMaxWidth(), shape = CARD_SHAPE) {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(stringResource(coreTitle(current)), style = MaterialTheme.typography.titleMedium)
-            Text(stringResource(coreSentence(current), section), style = MaterialTheme.typography.bodyLarge)
+            val captureLost = current == CoreStep.SESSION && state.isRunning && !state.captureGranted
+            Text(if (captureLost) stringResource(R.string.capture_lost_body) else stringResource(coreSentence(current), section),
+                style = MaterialTheme.typography.bodyLarge)
             val busy = current == CoreStep.SESSION && (state.phase == SessionPhase.STARTING || (state.isRunning && state.captureGranted))
+            val verb = if (captureLost) R.string.capture_lost_verb else coreVerb(current, state)
             if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(24.dp)); Spacer(Modifier.width(12.dp)); Text(stringResource(R.string.wiz_starting))
             } else Button(
@@ -216,7 +241,7 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
                 },
                 modifier = Modifier.fillMaxWidth().height(BTN_H),
                 shape = BTN_SHAPE,
-            ) { Text(stringResource(coreVerb(current, state))) }
+            ) { Text(stringResource(verb), maxLines = 1) }
         }
     }
 }

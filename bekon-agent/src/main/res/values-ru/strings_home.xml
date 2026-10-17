@@ -84,4 +84,14 @@
     <string name="verb_enable">Включить</string>
     <string name="verb_open">Открыть</string>
     <string name="verb_i_did">Я сделал</string>
+    <string name="capture_lost_body">Показ экрана отключён — включите снова</string>
+    <string name="capture_lost_verb">Включить снова</string>
+    <string name="dot_session_on">Показ экрана — включён</string>
+    <string name="dot_session_off">Показ экрана — не включён</string>
+    <string name="dot_notif_on">Уведомления — включены</string>
+    <string name="dot_notif_off">Уведомления — не включены</string>
+    <string name="dot_restricted_on">Ограниченные настройки — разблокированы</string>
+    <string name="dot_restricted_off">Ограниченные настройки — заблокированы</string>
+    <string name="dot_a11y_on">Жесты — включены</string>
+    <string name="dot_a11y_off">Жесты — не включены</string>
 </resources>

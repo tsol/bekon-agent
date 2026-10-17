@@ -125,7 +125,7 @@ class MainActivity : ComponentActivity() {
             HomeIntent.Stop -> {
                 bringUp = false
                 handler.removeCallbacksAndMessages(null)
-                SessionService.stop(this)
+                SessionService.stopNow(this)
             }
             HomeIntent.Pause -> SessionService.setPaused(true)
             HomeIntent.Resume -> SessionService.setPaused(false)

@@ -79,6 +79,8 @@ data class HomeState(
 ) {
     val canStart: Boolean get() = phase == SessionPhase.IDLE
     val isRunning: Boolean get() = phase == SessionPhase.SERVING
+    /** Service/tunnel up or coming up: the home card must always offer Stop. */
+    val sessionActive: Boolean get() = phase == SessionPhase.SERVING || phase == SessionPhase.STARTING
     /** Session over (or never started / fresh process): overlays (bacon frame, coach, status pill) must be gone. */
     val overlaysMustClear: Boolean get() = phase == SessionPhase.IDLE || phase == SessionPhase.FAILED || phase == SessionPhase.STOPPING
     val canShowQr: Boolean get() = !publicUrl.isNullOrBlank()
