@@ -1,27 +1,27 @@
 # Auditing Bekon Agent (for AI agents and humans)
 
-The app links to the tag that matches its installed version, e.g. `v1.0.20`. Use the links for that tag; replace
-`v1.0.20` with the version shown in the app (Settings → Version).
+The app links to the tag that matches its installed version, e.g. `v1.0.21`. Use the links for that tag; replace
+`v1.0.21` with the version shown in the app (Settings → Version).
 
-- Source tree: https://github.com/tsol/bekon-agent/tree/v1.0.20
-- Zip archive: https://github.com/tsol/bekon-agent/archive/refs/tags/v1.0.20.zip
+- Source tree: https://github.com/tsol/bekon-agent/tree/v1.0.21
+- Zip archive: https://github.com/tsol/bekon-agent/archive/refs/tags/v1.0.21.zip
 - Previous audit and its fixes: [SECURITY-AUDIT.md](SECURITY-AUDIT.md)
 
-## Key files (raw, pinned to v1.0.20)
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/SECURITY-AUDIT.md
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/AndroidManifest.xml
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/mcp/McpHandler.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/access/ClientGate.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/server/LocalServer.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/session/SessionService.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/tunnel/CloudflareTunnel.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/core/DeviceExecutor.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/device/capture/ScreenCapture.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/status/Capabilities.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/handoff/AgentGuide.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/ui/AuditPrompt.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/src/main/res/xml/accessibility_service_config.xml
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.20/bekon-agent/build.gradle.kts
+## Key files (raw, pinned to v1.0.21)
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/SECURITY-AUDIT.md
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/AndroidManifest.xml
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/mcp/McpHandler.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/access/ClientGate.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/server/LocalServer.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/session/SessionService.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/tunnel/CloudflareTunnel.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/core/DeviceExecutor.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/device/capture/ScreenCapture.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/status/Capabilities.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/handoff/AgentGuide.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/ui/AuditPrompt.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/src/main/res/xml/accessibility_service_config.xml
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.21/bekon-agent/build.gradle.kts
 
 ## Rules for the auditor
 - Answer only from the actual code, with file:line references. No generic checklists.

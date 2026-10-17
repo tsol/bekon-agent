@@ -34,6 +34,8 @@ class LinkControl(
     interface Apps {
         fun list(): List<Pair<String, String>> // label to package
         fun open(pkg: String)
+        /** http/https only; caller validates. */
+        fun openUrl(url: String) { throw CapabilityException("open url not available") }
     }
     interface Coach {
         fun draw(shapes: List<Shape>, append: Boolean = false): Boolean
@@ -46,7 +48,7 @@ class LinkControl(
         class Tap(val x: Int, val y: Int, label: String) : Act("tapped: ${label.take(80)}")
         class Long(val x: Int, val y: Int, label: String) : Act("long-pressed: ${label.take(80)}")
         class Type(val x: Int, val y: Int, label: String) : Act("typed into: ${label.take(80)}")
-        class Swipe(val x1: Int, val y1: Int, val x2: Int, val y2: Int, dir: String) : Act("scrolled $dir")
+        class Swipe(val x1: Int, val y1: Int, val x2: Int, val y2: Int, val forward: Boolean, dir: String) : Act("scrolled $dir")
         class Nav(val action: String) : Act("nav $action")
         class Open(val pkg: String, label: String) : Act("opened: ${label.take(80)}")
         class Highlight(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val label: String) :
@@ -76,6 +78,7 @@ class LinkControl(
                 return screen(tok, note = query["note"])
             }
             path.matches(Regex("""^/s/[^/]+/apps/?$""")) -> return appsPage(path.split('/')[2])
+            path.matches(Regex("""^/s/[^/]+/open/?$""")) -> return openUrl(path.split('/')[2], query["url"] ?: "")
             path.matches(Regex("""^/s/[^/]+/shot\.jpe?g$""")) -> return shot(path.split('/')[2])
             path.matches(Regex("""^/s/[^/]+/do/[^/]+/?$""")) -> {
                 val parts = path.trimEnd('/').split('/')
@@ -198,10 +201,13 @@ class LinkControl(
                         val id = put(token, Act.Nav(n))
                         sb.append(a("$base/do/$id", n)).append(" ")
                     }
-                    val up = put(token, Act.Swipe(snap.screenW / 2, snap.screenH * 3 / 4, snap.screenW / 2, snap.screenH / 4, "up"))
-                    val down = put(token, Act.Swipe(snap.screenW / 2, snap.screenH / 4, snap.screenW / 2, snap.screenH * 3 / 4, "down"))
-                    sb.append(" · scroll ").append(a("$base/do/$up", "up")).append(" / ").append(a("$base/do/$down", "down"))
+                    // "down" = reveal content further down (finger moves up).
+                    val down = put(token, Act.Swipe(snap.screenW / 2, snap.screenH * 7 / 10, snap.screenW / 2, snap.screenH * 3 / 10, true, "down"))
+                    val up = put(token, Act.Swipe(snap.screenW / 2, snap.screenH * 3 / 10, snap.screenW / 2, snap.screenH * 7 / 10, false, "up"))
+                    sb.append(" · scroll ").append(a("$base/do/$down", "down")).append(" / ").append(a("$base/do/$up", "up"))
                     sb.append("</p>\n")
+                    sb.append("<p>Open a website: <code>${esc(base)}/open?url=https://…</code> (http/https only). ")
+                    sb.append("Type into a field: its <i>type?text=</i> link; add <code>&amp;enter=1</code> to submit.</p>\n")
                 }
                 sb.append("<h2>Elements</h2>\n<ul>\n")
                 val visible = items.filter { it.window != "ime" }
@@ -299,21 +305,24 @@ class LinkControl(
         // Coach is allowed in read-only; writes are not.
         val isCoach = act is Act.Highlight || act is Act.Arrow || act is Act.Hint || act is Act.Clear
         if (!isCoach && readOnly()) return screen(token, note = "Read-only: action ignored.")
+        if (gate?.isPaused() == true) return html(403, esc(ClientGate.PAUSED))
         return try {
             AgentConnections.busy {
                 when (act) {
                     is Act.Tap -> executor.tap(act.x, act.y)
                     is Act.Long -> executor.longPress(act.x, act.y)
                     is Act.Type -> {
-                        val text = query["text"]?.let { URLDecoder.decode(it, "UTF-8") } ?: ""
+                        // Ktor already URL-decodes query values; do not decode twice.
+                        val text = query["text"] ?: ""
                         if (text.isEmpty()) return@busy screen(token, note = "type needs ?text=")
                         executor.tap(act.x, act.y)
-                        Thread.sleep(200)
-                        executor.typeText(text, replace = false, asKeys = false)
+                        Thread.sleep(350) // focus lands; typeText waits up to 1.2 s more for an input-focused field
+                        executor.typeText(text, replace = true, asKeys = false)
+                        if (query["enter"] == "1" || query["submit"] == "1") { Thread.sleep(150); executor.key("enter", 1) }
                     }
-                    is Act.Swipe -> executor.swipe(act.x1, act.y1, act.x2, act.y2, 350)
+                    is Act.Swipe -> (try { executor.scroll(act.forward) } catch (_: CapabilityException) { false }) || executor.swipe(act.x1, act.y1, act.x2, act.y2, 350)
                     is Act.Nav -> executor.nav(act.action)
-                    is Act.Open -> apps?.open(act.pkg) ?: throw CapabilityException("apps not available")
+                    is Act.Open -> { (apps ?: throw CapabilityException("apps not available")).open(act.pkg); waitForPackage(act.pkg) }
                     is Act.Highlight -> {
                         val c = coach ?: throw CapabilityException("coach: Gestures off")
                         c.draw(listOf(Shape(Shape.Kind.BOX, act.x1, act.y1, act.x2, act.y2, act.label.take(40))), append = true)
@@ -324,7 +333,7 @@ class LinkControl(
                     }
                     is Act.Hint -> {
                         val c = coach ?: throw CapabilityException("coach: Gestures off")
-                        val text = (query["text"]?.let { URLDecoder.decode(it, "UTF-8") } ?: "").ifBlank { "Look here" }.take(80)
+                        val text = (query["text"] ?: "").ifBlank { "Look here" }.take(80)
                         c.draw(listOf(Shape(Shape.Kind.TEXT, act.x, act.y, act.x, act.y, text)), append = true)
                     }
                     is Act.Clear -> coach?.clear()
@@ -387,6 +396,46 @@ class LinkControl(
         sb.append("<div style=\"background:#fff3cd;border:2px solid #d4a017;padding:12px;margin:8px 0;border-radius:8px\">")
         sb.append("<b>Message from the phone owner</b><br>").append(esc(msg))
         sb.append("</div>\n")
+    }
+
+
+    private val openTimes = ArrayDeque<Long>()
+
+    /** Agent-built URL (cannot be one-shot): http/https only, read-only/pause respected, max 1 per 2 s and 20 per 10 min. */
+    private fun openUrl(token: String, raw: String): Page {
+        if (auth(token) == null) return html(401, "Invalid or expired session.")
+        if (gate?.isPaused() == true) return html(403, esc(ClientGate.PAUSED))
+        if (readOnly()) return screen(token, note = "Read-only: open url ignored.")
+        val url = raw.trim()
+        val uri = try { java.net.URI(url) } catch (_: Exception) { null }
+        if (uri == null || (uri.scheme?.lowercase() != "http" && uri.scheme?.lowercase() != "https") || uri.host.isNullOrBlank())
+            return screen(token, note = "open needs ?url=https://… (http/https only)")
+        val now = System.currentTimeMillis()
+        synchronized(openTimes) {
+            while (openTimes.isNotEmpty() && now - openTimes.first() > 600_000) openTimes.removeFirst()
+            if ((openTimes.isNotEmpty() && now - openTimes.last() < 2_000) || openTimes.size >= 20)
+                return screen(token, note = "open url rate-limited; try again shortly")
+            openTimes.addLast(now)
+        }
+        return try {
+            AgentConnections.busy {
+                (apps ?: throw CapabilityException("open url not available")).openUrl(url)
+                settleQuiet(debounceMs = 700, maxMs = 3_500)
+                screen(token, note = "opened: " + url.take(100))
+            }
+        } catch (e: CapabilityException) { screen(token, note = e.message ?: "blocked") }
+        catch (e: Exception) { screen(token, note = e.message ?: "error") }
+    }
+
+    /** After launching [pkg]: wait until it is in front, then for a quiet UI (popups/dialogs), max ~3.5 s total. */
+    private fun waitForPackage(pkg: String) {
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < 2_500) {
+            if (executor.foreground()["package"] == pkg) break
+            Thread.sleep(80)
+        }
+        val left = (3_500 - (System.currentTimeMillis() - start)).coerceAtLeast(600)
+        settleQuiet(debounceMs = 600, maxMs = left)
     }
 
     /** Wait until accessibility goes quiet (~debounceMs) or maxMs elapses, then the next snapshot/shot is fresh. */
@@ -454,11 +503,18 @@ class LinkControl(
                     val sameText = key(n).isNotEmpty() && key(n) == key(k)
                     val nest = nb != null && kb != null && nb.size == 4 && kb.size == 4 &&
                         (contains(kb, nb) || contains(nb, kb) || (sameText && overlaps(kb, nb)))
-                    if (nest && (sameText || key(n).isEmpty() || key(k).isEmpty() ||
-                            (nb != null && kb != null && (contains(kb, nb) || contains(nb, kb))))) {
+                    // Merge only true duplicates: same text overlapping, or an unlabeled container around a labeled child.
+                    // (1.0.20 merged ANY nested pair, so a big WebView/list swallowed all page text, links and fields.)
+                    // Unlabeled wrapper absorbs a labeled child only when it is about the child's size (icon button +
+                    // label); big containers (WebView, lists, toolbars) never swallow their content.
+                    val emptyWrap = (key(n).isEmpty() || key(k).isEmpty()) && nb != null && kb != null &&
+                        (contains(kb, nb) || contains(nb, kb)) &&
+                        maxOf(area(kb), area(nb)) <= 4 * maxOf(1, minOf(area(kb), area(nb)))
+                    if (nest && (sameText || emptyWrap)) {
                         kept[i] = better(k, n).let { win ->
                             val w = listOfNotNull(k.window, n.window).firstOrNull { it != "application" } ?: win.window
-                            if (w == win.window) win else win.copy(window = w)
+                            val lab = if (win.label.isBlank()) (if (k.label.isNotBlank()) k.label else n.label) else win.label
+                            win.copy(window = w, label = lab)
                         }
                         merged = true
                         break

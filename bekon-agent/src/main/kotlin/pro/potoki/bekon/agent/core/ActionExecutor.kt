@@ -104,6 +104,8 @@ interface ActionExecutor {
     fun changeSignal(): ChangeSignal? = null
     /** Foreground package/activity/window title, best effort. */
     fun foreground(): Map<String, String> = emptyMap()
+    /** Scroll the largest scrollable container; forward = reveal content further down. False if none handled it. */
+    fun scroll(forward: Boolean): Boolean = false
 }
 
 /** Counter of meaningful accessibility events (own overlay and status-bar ticks excluded). */

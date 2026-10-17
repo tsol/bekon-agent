@@ -18,7 +18,7 @@ object A11yDump {
     private const val TAG = "A11yDump"
     const val PREFS_DUMP = "a11y_dump"
     private const val PREFS_NAME = "wlya_prefs"
-    private const val MAX_NODES = 400
+    private const val MAX_NODES = 1000
     private const val MAX_TEXT = 200
 
     fun isDumpEnabled(ctx: Context): Boolean = true

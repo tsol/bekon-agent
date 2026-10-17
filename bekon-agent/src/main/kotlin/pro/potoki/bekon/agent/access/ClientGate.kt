@@ -61,6 +61,8 @@ class ClientGate(
     /** Session end / Stop / owner revoke: every token is invalid from now on. */
     @Synchronized fun reset() { tokens.clear() }
 
+    fun isPaused(): Boolean = paused()
+
     /** Path-token auth for link-control: constant-time match against the issued session token. Returns clientId or null. */
     @Synchronized fun tokenFor(clientId: String): String? = tokens[clientId]
 

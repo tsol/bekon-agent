@@ -228,6 +228,10 @@ class SessionService : Service() {
                                 ?: throw pro.potoki.bekon.agent.core.CapabilityException("no launchable app $pkg")
                             startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                         }
+                        override fun openUrl(url: String) {
+                            startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
                     },
                     linkCoach = object : pro.potoki.bekon.agent.server.LinkControl.Coach {
                         override fun draw(shapes: List<pro.potoki.bekon.agent.coach.Shape>, append: Boolean) =

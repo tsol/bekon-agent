@@ -232,12 +232,11 @@ class TouchController(private val svc: AccessibilityService) {
                 }
             }
             "enter" -> {
-                if (injectKeyCode(KeyEvent.KEYCODE_ENTER)) true
-                else {
-                    val node = focusedEditable() ?: return false
-                    if (Build.VERSION.SDK_INT >= 30 && node.performAction(ACTION_IME_ENTER)) true
-                    else setText(node, (node.text?.toString() ?: "") + "\n")
-                }
+                val node = focusedEditable(300)
+                if (node != null && Build.VERSION.SDK_INT >= 30 && node.performAction(ACTION_IME_ENTER)) true
+                else if (injectKeyCode(KeyEvent.KEYCODE_ENTER)) true
+                else if (node != null) setText(node, (node.text?.toString() ?: "") + "\n")
+                else false
             }
             "clear" -> {
                 val target = focusedEditable() ?: return false
@@ -290,15 +289,45 @@ class TouchController(private val svc: AccessibilityService) {
         return target.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
     }
 
-    private fun focusedEditable(): AccessibilityNodeInfo? {
-        val root = svc.rootInActiveWindow
-        if (root == null) {
-            Log.w(TAG, "no active window")
-            return null
+    /**
+     * Input-focused editable in ANY window (browser URL bars and popups live outside rootInActiveWindow),
+     * waiting briefly for focus to land after a tap; then first editable in the active window.
+     */
+    private fun focusedEditable(waitMs: Long = 1_200): AccessibilityNodeInfo? {
+        val deadline = android.os.SystemClock.uptimeMillis() + waitMs
+        while (true) {
+            val f = try { svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } catch (_: Exception) { null }
+            if (f != null && canSetText(f)) return f
+            if (android.os.SystemClock.uptimeMillis() >= deadline) break
+            Thread.sleep(100)
         }
-        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        if (focused != null && canSetText(focused)) return focused
+        val root = svc.rootInActiveWindow
+        if (root == null) { Log.w(TAG, "no active window"); return null }
         return findEditable(root)
+    }
+
+    /** Largest scrollable node across app windows (incl. WebView); ACTION_SCROLL_FORWARD/BACKWARD. */
+    fun scroll(forward: Boolean): Boolean {
+        var best: AccessibilityNodeInfo? = null; var bestArea = 0
+        val wins = try { svc.windows } catch (_: Exception) { null }
+        val roots = wins?.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
+            ?.mapNotNull { try { it.root } catch (_: Exception) { null } }
+            ?.ifEmpty { null } ?: listOfNotNull(svc.rootInActiveWindow)
+        val stack = ArrayDeque<AccessibilityNodeInfo>(); roots.forEach { stack.add(it) }
+        var n = 0
+        val r = android.graphics.Rect()
+        while (stack.isNotEmpty() && n < 3000) {
+            val x = stack.removeLast(); n++
+            if (x.isScrollable && x.isVisibleToUser) {
+                x.getBoundsInScreen(r); val a = r.width() * r.height()
+                if (a > bestArea) { bestArea = a; best = x }
+            }
+            for (i in 0 until x.childCount) x.getChild(i)?.let { stack.add(it) }
+        }
+        val b = best ?: return false
+        val ok = b.performAction(if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+        Log.i(TAG, "scroll forward=$forward node=${b.className} ok=$ok")
+        return ok
     }
 
     private fun setText(node: AccessibilityNodeInfo, value: String): Boolean {
