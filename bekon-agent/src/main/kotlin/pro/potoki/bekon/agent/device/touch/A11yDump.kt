@@ -84,14 +84,15 @@ object A11yDump {
                     } catch (_: Exception) {
                         null
                     }
+                    val winType = windowType(w)
                     if (root != null) {
-                        walk(root, out, if (sysWin) sbH else -1)
+                        walk(root, out, if (sysWin) sbH else -1, winType)
                         recycleQuiet(root)
                     }
                 }
             } else {
                 val root = svc.rootInActiveWindow ?: return null
-                walk(root, out, -1)
+                walk(root, out, -1, "application")
                 recycleQuiet(root)
             }
         } catch (e: Exception) {
@@ -121,7 +122,19 @@ object A11yDump {
     }
 
     /** [sbH] >= 0: node is in a system window; mark nodes inside the status bar strip. */
-    private fun walk(node: AccessibilityNodeInfo, out: JSONArray, sbH: Int) {
+    private fun windowType(w: android.view.accessibility.AccessibilityWindowInfo): String {
+        val t = w.type
+        return when (t) {
+            android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "ime"
+            android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
+            android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION ->
+                // Non-active application windows are typically menus, dialogs, popups, edge panels.
+                if (w.isActive) "application" else "popup"
+            else -> "other"
+        }
+    }
+
+    private fun walk(node: AccessibilityNodeInfo, out: JSONArray, sbH: Int, winType: String) {
         if (out.length() >= MAX_NODES) return
         // Never ship password contents off the device.
         val text = if (node.isPassword) (if (node.text.isNullOrEmpty()) null else "[password hidden]") else clip(node.text?.toString())
@@ -161,6 +174,7 @@ object A11yDump {
             if (focused) obj.put("focused", true)
             node.packageName?.toString()?.let { obj.put("pkg", it) }
             if (sbH >= 0 && r.bottom <= sbH + 4) obj.put("statusBar", true)
+            obj.put("win", winType)
             out.put(obj)
         }
         val n = node.childCount
@@ -171,7 +185,7 @@ object A11yDump {
             } catch (_: Exception) {
                 null
             } ?: continue
-            walk(child, out, sbH)
+            walk(child, out, sbH, winType)
             recycleQuiet(child)
         }
     }

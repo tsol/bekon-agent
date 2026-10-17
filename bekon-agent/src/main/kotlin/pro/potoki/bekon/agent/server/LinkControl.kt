@@ -163,25 +163,32 @@ class LinkControl(
         return try {
             AgentConnections.busy {
                 val snap = executor.snapshot()
+                val snapId = rand().take(10)
+                val items = dedupe(snap.items)
                 val fg = executor.foreground()
                 val pkg = fg["package"] ?: "?"
                 val title = fg["title"] ?: fg["activity"] ?: ""
                 val ro = readOnly()
                 pruneNonces()
                 val base = abs("/s/$token")
+                val shotUrl = "$base/shot.jpg?v=$snapId"
                 val sb = StringBuilder()
                 sb.append("<!doctype html><html><head><meta charset=utf-8><title>Bekon screen</title></head><body>\n")
                 sb.append("<h1>Bekon screen</h1>\n")
+                appendOwnerBanner(sb, token)
                 if (note != null) sb.append("<p><b>${esc(note)}</b></p>\n")
                 if (usedStale) sb.append("<p><i>That link was already used or stale — showing current screen, no action ran.</i></p>\n")
                 sb.append("<p>App: <code>${esc(pkg)}</code>")
                 if (title.isNotBlank()) sb.append(" — ${esc(title)}")
-                sb.append("</p>\n")
+                sb.append(" · ${items.size} elements</p>\n")
                 if (ro) sb.append("<p><b>Read-only:</b> viewing + coach highlights only (no taps/typing).</p>\n")
+                // Screenshot first (absolute URL + cache-bust). Harmless JS refreshes img for humans; page works without JS.
+                sb.append("<p><img id=\"shot\" src=\"${esc(shotUrl)}\" alt=\"screenshot\" style=\"max-width:100%;height:auto;border:1px solid #ccc\"></p>\n")
+                sb.append("<script>(function(){var i=document.getElementById('shot');if(!i)return;setTimeout(function(){i.src='${esc(shotUrl)}&r=1';},800);})();</script>\n")
                 sb.append("<p>")
                 sb.append(a("$base/screen", "Refresh"))
                 sb.append(" · ").append(a("$base/apps", "Installed apps"))
-                sb.append(" · ").append(a("$base/shot.jpg", "Screenshot image"))
+                sb.append(" · ").append(a(shotUrl, "Screenshot image"))
                 val clearN = put(token, Act.Clear)
                 sb.append(" · ").append(a("$base/do/$clearN", "Clear highlights"))
                 sb.append("</p>\n")
@@ -197,8 +204,11 @@ class LinkControl(
                     sb.append("</p>\n")
                 }
                 sb.append("<h2>Elements</h2>\n<ul>\n")
-                for (n in snap.items.filter { !it.statusBar }) {
-                    sb.append("<li>${esc(n.label.ifBlank { "(unnamed)" })}")
+                for (n in items) {
+                    sb.append("<li>")
+                    val win = n.window?.takeIf { it.isNotBlank() && it != "application" }
+                    if (win != null) sb.append("<b>[${esc(win)}]</b> ")
+                    sb.append(esc(n.label.ifBlank { "(unnamed)" }))
                     if (n.clickable || n.checkable) sb.append(" <i>[actionable]</i>")
                     if (n.checkable) sb.append(if (n.checked) " ✓" else " ○")
                     val b = n.bounds
@@ -222,7 +232,6 @@ class LinkControl(
                     sb.append("</li>\n")
                 }
                 sb.append("</ul>\n")
-                sb.append("<p><img src=\"$base/shot.jpg\" alt=\"screenshot\" style=\"max-width:100%;height:auto\"></p>\n")
                 sb.append("<p><small>One-shot links. Stale/reuse shows this page with no action. Stop on the phone ends the token.</small></p>\n")
                 sb.append("</body></html>")
                 Page(200, sb.toString())
@@ -241,7 +250,9 @@ class LinkControl(
         val base = abs("/s/$token")
         val sb = StringBuilder()
         sb.append("<!doctype html><html><head><meta charset=utf-8><title>Apps</title></head><body>\n")
-        sb.append("<h1>Installed apps</h1>\n<p>").append(a("$base/screen", "← Back to screen")).append("</p>\n<ul>\n")
+        sb.append("<h1>Installed apps</h1>\n")
+        appendOwnerBanner(sb, token)
+        sb.append("<p>").append(a("$base/screen", "← Back to screen")).append("</p>\n<ul>\n")
         for ((label, pkg) in list.take(400)) {
             sb.append("<li>${esc(label)} <code>${esc(pkg)}</code>")
             if (!ro) {
@@ -308,7 +319,7 @@ class LinkControl(
                     }
                     is Act.Clear -> coach?.clear()
                 }
-                if (!isCoach) Thread.sleep(settleMs)
+                if (!isCoach) settleQuiet()
                 screen(token, note = act.what)
             }
         } catch (e: CapabilityException) {
@@ -338,6 +349,49 @@ class LinkControl(
         return Base64.getUrlEncoder().withoutPadding().encodeToString(b)
     }
 
+
+    /**
+     * Drain owner→agent pill-menu events (same queue MCP agents read). Shown once as a banner on the next
+     * link page. [changed_mind] also drops every outstanding action nonce for this session token.
+     */
+    private fun pullOwnerBanner(token: String): String? {
+        val ev = pro.potoki.bekon.agent.status.UserEvents.drain()
+        if (ev.isEmpty()) return null
+        if (ev.any { it.type == "changed_mind" }) {
+            nonces.entries.removeIf { it.value.token == token }
+        }
+        val lines = ev.map { e ->
+            when (e.type) {
+                "changed_mind" -> "Owner: I changed my mind — cancel the current step. Old action links are now stale."
+                "new_goal" -> "Owner new goal: " + (e.text ?: "(empty)")
+                "back_to_app" -> "Owner: back in the Bekon app."
+                "cancel_all" -> "Owner: cancel all — " + (e.text ?: "session paused/stopped")
+                else -> "Owner: " + e.type + (e.text?.let { ": $it" } ?: "")
+            }
+        }
+        return lines.joinToString(" ")
+    }
+
+    private fun appendOwnerBanner(sb: StringBuilder, token: String) {
+        val msg = pullOwnerBanner(token) ?: return
+        sb.append("<div style=\"background:#fff3cd;border:2px solid #d4a017;padding:12px;margin:8px 0;border-radius:8px\">")
+        sb.append("<b>Message from the phone owner</b><br>").append(esc(msg))
+        sb.append("</div>\n")
+    }
+
+    /** Wait until accessibility goes quiet (~debounceMs) or maxMs elapses, then the next snapshot/shot is fresh. */
+    private fun settleQuiet(debounceMs: Long = 500, maxMs: Long = 2_500) {
+        val start = System.currentTimeMillis()
+        var lastSeq = executor.changeSignal()?.seq ?: -1L
+        var quietSince = start
+        while (System.currentTimeMillis() - start < maxMs) {
+            Thread.sleep(40)
+            val seq = executor.changeSignal()?.seq ?: lastSeq
+            if (seq != lastSeq) { lastSeq = seq; quietSince = System.currentTimeMillis() }
+            if (System.currentTimeMillis() - quietSince >= debounceMs) break
+        }
+    }
+
     private fun abs(path: String): String {
         val r = root().trimEnd('/')
         return if (r.isEmpty()) path else r + path
@@ -347,4 +401,60 @@ class LinkControl(
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
     private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
     private fun html(code: Int, body: String) = Page(code, "<!doctype html><html><head><meta charset=utf-8></head><body>$body</body></html>")
+    companion object {
+        /**
+         * Merge duplicate / nested labels: same text (or one blank) with overlapping or contained bounds
+         * collapses to one entry, preferring the clickable (or larger) node. Drops empty non-informative nodes
+         * and status-bar chrome. Popup/system/ime windows are kept and sorted above the main app list.
+         */
+        fun dedupe(items: List<pro.potoki.bekon.agent.core.UiNode>): List<pro.potoki.bekon.agent.core.UiNode> {
+            fun key(n: pro.potoki.bekon.agent.core.UiNode) = n.label.trim().lowercase()
+            fun area(b: IntArray?) = if (b == null || b.size != 4) 0 else (b[2] - b[0]).coerceAtLeast(0) * (b[3] - b[1]).coerceAtLeast(0)
+            fun contains(a: IntArray, b: IntArray): Boolean =
+                a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3]
+            fun overlaps(a: IntArray, b: IntArray): Boolean =
+                a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+            fun informative(n: pro.potoki.bekon.agent.core.UiNode): Boolean {
+                if (n.statusBar) return false
+                val lab = n.label.trim()
+                if (lab.isEmpty() || lab == "(unnamed)") return n.clickable || n.checkable
+                // Skip pure whitespace / single punctuation noise
+                if (lab.length <= 1 && !n.clickable && !n.checkable) return false
+                return true
+            }
+            fun better(a: pro.potoki.bekon.agent.core.UiNode, b: pro.potoki.bekon.agent.core.UiNode): pro.potoki.bekon.agent.core.UiNode {
+                if (a.clickable != b.clickable) return if (a.clickable) a else b
+                if (a.checkable != b.checkable) return if (a.checkable) a else b
+                return if (area(a.bounds) >= area(b.bounds)) a else b
+            }
+            val src = items.filter(::informative)
+            val kept = ArrayList<pro.potoki.bekon.agent.core.UiNode>()
+            for (n in src) {
+                val nb = n.bounds
+                var merged = false
+                for (i in kept.indices) {
+                    val k = kept[i]
+                    val kb = k.bounds
+                    val sameText = key(n).isNotEmpty() && key(n) == key(k)
+                    val nest = nb != null && kb != null && nb.size == 4 && kb.size == 4 &&
+                        (contains(kb, nb) || contains(nb, kb) || (sameText && overlaps(kb, nb)))
+                    if (nest && (sameText || key(n).isEmpty() || key(k).isEmpty() ||
+                            (nb != null && kb != null && (contains(kb, nb) || contains(nb, kb))))) {
+                        kept[i] = better(k, n).let { win ->
+                            // Prefer popup window tag if either side is a popup/dialog.
+                            val w = listOfNotNull(k.window, n.window).firstOrNull { it != "application" } ?: win.window
+                            if (w == win.window) win else win.copy(window = w)
+                        }
+                        merged = true
+                        break
+                    }
+                }
+                if (!merged) kept.add(n)
+            }
+            // Popups/dialogs/ime first so agents notice menus covering the app.
+            val rank = { w: String? -> when (w) { "popup" -> 0; "ime" -> 1; "system" -> 2; "other" -> 3; else -> 4 } }
+            return kept.sortedWith(compareBy({ rank(it.window) }, { it.bounds?.getOrNull(1) ?: it.y }, { it.bounds?.getOrNull(0) ?: it.x }))
+        }
+    }
+
 }

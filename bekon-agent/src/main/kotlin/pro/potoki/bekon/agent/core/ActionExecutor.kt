@@ -15,6 +15,8 @@ data class UiNode(
     val pkg: String? = null,
     /** Status-bar clock/notification icons: shown, but never counted as a screen change. */
     val statusBar: Boolean = false,
+    /** application / popup / system / ime / other — from accessibility window type. */
+    val window: String? = null,
 )
 
 /**
