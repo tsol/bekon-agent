@@ -237,6 +237,7 @@ fun BekonHome(state: HomeState, tick: Int = 0, onIntent: (HomeIntent) -> Unit) {
         ) {
             FooterLink(stringResource(R.string.home_a11y_disclosure)) { Consent.showDisclosure(ctx, Consent.Kind.A11Y) }
             FooterLink(stringResource(R.string.home_privacy)) { Consent.openPrivacyPolicy(ctx) }
+            FooterLink(stringResource(R.string.audit_ask)) { pro.potoki.bekon.agent.ui.SourceCode.askAgentToAudit(ctx) }
         }
       }
     }
@@ -584,6 +585,14 @@ private fun SettingsMenuButton() {
             if (Consent.imeAvailable()) DropdownMenuItem(
                 text = { Text(stringResource(R.string.home_keyboard_disclosure)) },
                 onClick = { open = false; Consent.showDisclosure(ctx, Consent.Kind.IME, thenOpenSettings = false) },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.audit_ask)) },
+                onClick = { open = false; pro.potoki.bekon.agent.ui.SourceCode.askAgentToAudit(ctx) },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.source_code)) },
+                onClick = { open = false; pro.potoki.bekon.agent.ui.SourceCode.open(ctx) },
             )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.home_app_info)) },

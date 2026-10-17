@@ -219,6 +219,12 @@ object GestureOverlay {
         attached = false
     }
 
+    private const val TAP_MS = 600L
+    private const val LONG_FILL_MS = 800L
+    private const val SWIPE_DRAW_MS = 450L
+    private const val SWIPE_HOLD_MS = 200L
+    private const val FADE_MS = 350L
+
     private class OverlayView(context: Context) : View(context) {
         sealed class Mark {
             abstract val label: String
@@ -227,31 +233,24 @@ object GestureOverlay {
             data class Swipe(val a: PointF, val b: PointF, override val label: String) : Mark()
         }
 
-        private val marks = ArrayDeque<Mark>()
+        private class Live(val mark: Mark, val t0: Long)
+        private val marks = ArrayDeque<Live>()
         private val hideRunnable = Runnable {
             marks.clear()
             invalidate()
         }
-
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = Color.argb(140, 255, 64, 129)
-        }
-        private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 6f
-            color = Color.WHITE
-        }
-        private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 8f
-            color = Color.argb(220, 255, 213, 79)
-            strokeCap = Paint.Cap.ROUND
-        }
-        private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textSize = 36f
-            setShadowLayer(4f, 0f, 1f, Color.BLACK)
+        private val dp = context.resources.displayMetrics.density
+        // Accent with alpha; drawn briefly so content is never covered for long.
+        private val accentR = 255; private val accentG = 112; private val accentB = 67
+        private fun accent(a: Float) = Color.argb((a.coerceIn(0f, 1f) * 255).toInt(), accentR, accentG, accentB)
+        private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+        private val trail = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+        private val arrow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; strokeJoin = Paint.Join.ROUND }
+        init {
+            val sh = Color.argb(70, 0, 0, 0)
+            dot.setShadowLayer(4f * dp, 0f, 1f * dp, sh)
+            arrow.setShadowLayer(3f * dp, 0f, 1f * dp, sh)
         }
         private val coachBx = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; strokeWidth = 10f; color = Color.argb(255, 66, 133, 244)
@@ -285,12 +284,14 @@ object GestureOverlay {
         }
 
         fun show(mark: Mark) {
-            marks.addLast(mark)
+            marks.addLast(Live(mark, android.os.SystemClock.uptimeMillis()))
             while (marks.size > 6) marks.removeFirst()
             removeCallbacks(hideRunnable)
-            postDelayed(hideRunnable, 3500)
-            invalidate()
+            postDelayed(hideRunnable, 2500)
+            postInvalidateOnAnimation()
         }
+
+        private fun lifetime(m: Mark) = when (m) { is Mark.Tap -> TAP_MS; is Mark.LongPress -> LONG_FILL_MS + FADE_MS; is Mark.Swipe -> SWIPE_DRAW_MS + SWIPE_HOLD_MS + FADE_MS }
 
         fun showCoach(bbox: Rect?, label: String) {
             coach = Coach(bbox, label)
@@ -335,38 +336,71 @@ object GestureOverlay {
             drawCoach(canvas, ox, oy)
             // agent_status pill lives in its own small touchable window (StatusPill).
 
-            for (m in marks) {
-                when (m) {
-                    is Mark.Tap -> {
-                        val x = m.p.x - ox
-                        val y = m.p.y - oy
-                        canvas.drawCircle(x, y, 48f, fill)
-                        canvas.drawCircle(x, y, 48f, stroke)
-                        canvas.drawLine(x - 70f, y, x + 70f, y, stroke)
-                        canvas.drawLine(x, y - 70f, x, y + 70f, stroke)
-                        drawLabel(canvas, x, y + 90f, m.label)
-                    }
-                    is Mark.LongPress -> {
-                        val x = m.p.x - ox
-                        val y = m.p.y - oy
-                        canvas.drawCircle(x, y, 64f, fill)
-                        canvas.drawCircle(x, y, 64f, stroke)
-                        canvas.drawCircle(x, y, 88f, stroke)
-                        drawLabel(canvas, x, y + 110f, m.label)
-                    }
-                    is Mark.Swipe -> {
-                        val x1 = m.a.x - ox
-                        val y1 = m.a.y - oy
-                        val x2 = m.b.x - ox
-                        val y2 = m.b.y - oy
-                        canvas.drawLine(x1, y1, x2, y2, line)
-                        canvas.drawCircle(x1, y1, 28f, fill)
-                        canvas.drawCircle(x2, y2, 40f, fill)
-                        canvas.drawCircle(x2, y2, 40f, stroke)
-                        drawLabel(canvas, x2, y2 + 90f, m.label)
-                    }
+            val now = android.os.SystemClock.uptimeMillis()
+            marks.removeAll { now - it.t0 > lifetime(it.mark) }
+            for (lv in marks) {
+                val e = (now - lv.t0).toFloat()
+                when (val m = lv.mark) {
+                    is Mark.Tap -> drawTap(canvas, m.p.x - ox, m.p.y - oy, e / TAP_MS)
+                    is Mark.LongPress -> drawLongPress(canvas, m.p.x - ox, m.p.y - oy, e)
+                    is Mark.Swipe -> drawSwipe(canvas, m.a.x - ox, m.a.y - oy, m.b.x - ox, m.b.y - oy, e)
                 }
             }
+            if (marks.isNotEmpty()) postInvalidateOnAnimation()
+        }
+
+        /** Soft filled dot + expanding ring, fading out over ~600 ms. */
+        private fun drawTap(c: Canvas, x: Float, y: Float, t: Float) {
+            val k = 1f - (1f - t) * (1f - t) // ease-out
+            dot.color = accent(0.55f * (1f - t))
+            c.drawCircle(x, y, 12f * dp * (1f - 0.3f * t), dot)
+            ring.strokeWidth = 2.5f * dp * (1f - 0.5f * t)
+            ring.color = accent(0.85f * (1f - t))
+            c.drawCircle(x, y, 12f * dp + 30f * dp * k, ring)
+        }
+
+        /** Ring that fills clockwise while held, then fades. */
+        private fun drawLongPress(c: Canvas, x: Float, y: Float, e: Float) {
+            val fill = (e / LONG_FILL_MS).coerceIn(0f, 1f)
+            val fade = if (e > LONG_FILL_MS) 1f - (e - LONG_FILL_MS) / FADE_MS else 1f
+            val r = 26f * dp
+            dot.color = accent(0.45f * fade)
+            c.drawCircle(x, y, 10f * dp, dot)
+            ring.strokeWidth = 3f * dp
+            ring.color = accent(0.25f * fade)
+            c.drawCircle(x, y, r, ring)
+            ring.color = accent(0.9f * fade)
+            c.drawArc(x - r, y - r, x + r, y + r, -90f, 360f * fill, false, ring)
+        }
+
+        /** Tapering gradient trail drawn along the path, start dot and arrowhead at the moving tip. */
+        private fun drawSwipe(c: Canvas, x1: Float, y1: Float, x2: Float, y2: Float, e: Float) {
+            val p = (e / SWIPE_DRAW_MS).coerceIn(0f, 1f).let { 1f - (1f - it) * (1f - it) }
+            val fadeStart = SWIPE_DRAW_MS + SWIPE_HOLD_MS
+            val fade = if (e > fadeStart) (1f - (e - fadeStart) / FADE_MS).coerceIn(0f, 1f) else 1f
+            val hx = x1 + (x2 - x1) * p; val hy = y1 + (y2 - y1) * p
+            dot.color = accent(0.6f * fade)
+            c.drawCircle(x1, y1, 6f * dp, dot)
+            val n = 18
+            for (i in 0 until n) {
+                val f0 = i / n.toFloat(); val f1 = (i + 1) / n.toFloat()
+                trail.strokeWidth = (2f + 6f * f1) * dp
+                trail.color = accent((0.15f + 0.7f * f1) * fade)
+                c.drawLine(x1 + (hx - x1) * f0, y1 + (hy - y1) * f0, x1 + (hx - x1) * f1, y1 + (hy - y1) * f1, trail)
+            }
+            val dx = x2 - x1; val dy = y2 - y1
+            val len = kotlin.math.hypot(dx, dy)
+            if (len < 1f) return
+            val ux = dx / len; val uy = dy / len
+            val s = 14f * dp
+            val path = android.graphics.Path().apply {
+                moveTo(hx + ux * s, hy + uy * s)
+                lineTo(hx - ux * s * 0.6f + uy * s * 0.8f, hy - uy * s * 0.6f - ux * s * 0.8f)
+                lineTo(hx - ux * s * 0.6f - uy * s * 0.8f, hy - uy * s * 0.6f + ux * s * 0.8f)
+                close()
+            }
+            arrow.color = accent(0.95f * fade)
+            c.drawPath(path, arrow)
         }
 
         private fun drawCoach(canvas: Canvas, ox: Float, oy: Float) {
@@ -456,14 +490,6 @@ object GestureOverlay {
             val tx = left + pad * 2 + iconSz
             canvas.drawText(txt, tx, top + 18f * d, pillText)
             canvas.drawText(sub, tx, top + 33f * d, pillLabel)
-        }
-
-        private fun drawLabel(canvas: Canvas, x: Float, y: Float, label: String) {
-            val w = text.measureText(label)
-            val left = (x - w / 2f).coerceIn(8f, (width - w - 8f).coerceAtLeast(8f))
-            val lo = safeTop() + 48f
-            val hi = (height - safeBottom() - 24f).coerceAtLeast(lo)
-            canvas.drawText(label, left, y.coerceIn(lo, hi), text)
         }
 
         // Status bar / cutout / nav bar + bacon strip, in view coords.

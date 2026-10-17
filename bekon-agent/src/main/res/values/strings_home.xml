@@ -139,4 +139,8 @@
     <string name="g_cap_allow">Confirm with “Allow”.</string>
     <string name="g_cap_r1">Android blocked the setting. In “App info”, tap ⋮ at the top right.</string>
     <string name="g_cap_r2">Choose “Allow restricted settings” and confirm.</string>
+    <string name="audit_ask">Ask your agent to audit the code</string>
+    <string name="source_code">Source code</string>
+    <string name="audit_copied">Prompt copied — send it to your agent</string>
+    <string name="audit_prompt">Please review the source code of the Bekon Agent app %1$s installed on my phone: %2$s\n\nAssess security and privacy:\n1) what data leaves the device, where to and when;\n2) how permissions are used (accessibility, screen capture, notifications, keyboard) and whether anything is excessive;\n3) every network endpoint and tunnel the app connects to;\n4) whether Stop, Pause and Read-only really cut access.\nReply briefly: what looks fine and what raises questions, with file references.</string>
 </resources>

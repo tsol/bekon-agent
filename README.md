@@ -12,9 +12,9 @@ visible frame, a notification and a one-tap **Stop** are shown for the whole ses
 
 ## Verify this build / ask your agent to audit
 
-Every release is tagged with its version (`v1.0.1` … `v1.0.8`, …). The app's
+Every release is tagged with its version (`v1.0.1` … `v1.0.9`, …). The app's
 "ask your agent to check our code" button opens the tag matching the installed version, for example
-<https://github.com/tsol/bekon-agent/tree/v1.0.8>.
+<https://github.com/tsol/bekon-agent/tree/v1.0.9>.
 
 Hand that link to your AI agent and ask it to review:
 
@@ -28,8 +28,8 @@ Hand that link to your AI agent and ask it to review:
 Requires JDK 17+ and the Android SDK (`sdk.dir` in `local.properties`).
 
 Release tags point at the app source as it shipped (the module history was extracted from a larger
-monorepo, so tags up to v1.0.8 contain only `bekon-agent/`). To build, use `main`, which adds the
-standalone Gradle root:
+monorepo, so tags up to v1.0.8 contain only `bekon-agent/`). From `v1.0.9` on, tags are on `main` and build directly
+(`git checkout v1.0.9`); for older tags, build from `main`:
 
 ```bash
 ./gradlew :bekon-agent:assembleDebug            # debug APK

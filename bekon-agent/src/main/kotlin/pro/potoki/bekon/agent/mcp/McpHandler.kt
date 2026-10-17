@@ -223,7 +223,10 @@ class McpHandler(
             "initialize" -> respondJson(call, JsonRpcResponse(id = id, result = buildJsonObject {
                 put("protocolVersion", "2025-03-26")
                 put("capabilities", buildJsonObject { put("tools", JsonObject(emptyMap())) })
-                put("serverInfo", buildJsonObject { put("name", "bekon-agent"); put("version", pro.potoki.bekon.agent.BuildConfig.VERSION_NAME) })
+                put("serverInfo", buildJsonObject {
+                    put("name", "bekon-agent"); put("version", pro.potoki.bekon.agent.BuildConfig.VERSION_NAME)
+                    put("sourceUrl", pro.potoki.bekon.agent.ui.SourceCode.url)
+                })
                 put("instructions", pro.potoki.bekon.agent.handoff.AgentGuide.SERVER_INSTRUCTIONS)
                 put("deviceInfo", deviceInfoJson())
             }))
@@ -670,6 +673,7 @@ class McpHandler(
                 put("deviceInfo", deviceInfoJson())
                 put("capabilities", pro.potoki.bekon.agent.status.Capabilities.json())
                 put("endpoint", u?.let { pro.potoki.bekon.agent.handoff.Handoff.endpoint(it) } ?: "")
+                put("sourceUrl", pro.potoki.bekon.agent.ui.SourceCode.url)
                 put("text", u?.let { pro.potoki.bekon.agent.handoff.Handoff.text(it) } ?: "Bekon Agent MCP (Android remote control). No public tunnel URL yet.")
             }
         }
