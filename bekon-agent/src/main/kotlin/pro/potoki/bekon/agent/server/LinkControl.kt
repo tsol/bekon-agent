@@ -164,6 +164,7 @@ class LinkControl(
             AgentConnections.busy {
                 val snap = executor.snapshot()
                 val snapId = rand().take(10)
+                val imeOpen = snap.items.any { it.window == "ime" }
                 val items = dedupe(snap.items)
                 val fg = executor.foreground()
                 val pkg = fg["package"] ?: "?"
@@ -184,7 +185,6 @@ class LinkControl(
                 if (ro) sb.append("<p><b>Read-only:</b> viewing + coach highlights only (no taps/typing).</p>\n")
                 // Screenshot first (absolute URL + cache-bust). Harmless JS refreshes img for humans; page works without JS.
                 sb.append("<p><img id=\"shot\" src=\"${esc(shotUrl)}\" alt=\"screenshot\" style=\"max-width:100%;height:auto;border:1px solid #ccc\"></p>\n")
-                sb.append("<script>(function(){var i=document.getElementById('shot');if(!i)return;setTimeout(function(){i.src='${esc(shotUrl)}&r=1';},800);})();</script>\n")
                 sb.append("<p>")
                 sb.append(a("$base/screen", "Refresh"))
                 sb.append(" · ").append(a("$base/apps", "Installed apps"))
@@ -204,7 +204,16 @@ class LinkControl(
                     sb.append("</p>\n")
                 }
                 sb.append("<h2>Elements</h2>\n<ul>\n")
-                for (n in items) {
+                val visible = items.filter { it.window != "ime" }
+                if (imeOpen) {
+                    sb.append("<li><b>[keyboard]</b> Keyboard is open — type with type?text= on a field")
+                    if (!ro) {
+                        val hide = put(token, Act.Nav("back"))
+                        sb.append(" — ").append(a("$base/do/$hide", "hide keyboard"))
+                    }
+                    sb.append("</li>\n")
+                }
+                for (n in visible) {
                     sb.append("<li>")
                     val win = n.window?.takeIf { it.isNotBlank() && it != "application" }
                     if (win != null) sb.append("<b>[${esc(win)}]</b> ")
@@ -233,6 +242,7 @@ class LinkControl(
                 }
                 sb.append("</ul>\n")
                 sb.append("<p><small>One-shot links. Stale/reuse shows this page with no action. Stop on the phone ends the token.</small></p>\n")
+                sb.append("<script>(function(){var i=document.getElementById('shot');if(!i)return;setTimeout(function(){i.src='${esc(shotUrl)}&r=1';},800);})();</script>\n")
                 sb.append("</body></html>")
                 Page(200, sb.toString())
             }
@@ -451,9 +461,19 @@ class LinkControl(
                 }
                 if (!merged) kept.add(n)
             }
-            // Popups/dialogs/ime first so agents notice menus covering the app.
-            val rank = { w: String? -> when (w) { "popup" -> 0; "ime" -> 1; "system" -> 2; "other" -> 3; else -> 4 } }
-            return kept.sortedWith(compareBy({ rank(it.window) }, { it.bounds?.getOrNull(1) ?: it.y }, { it.bounds?.getOrNull(0) ?: it.x }))
+            // Same plain-text label in the same window (toolbar title + content title): keep first non-actionable.
+            val plain = ArrayList<pro.potoki.bekon.agent.core.UiNode>()
+            for (n in kept) {
+                val actionable = n.clickable || n.checkable
+                val dup = !actionable && key(n).isNotEmpty() && plain.any {
+                    !it.clickable && !it.checkable && key(it) == key(n) &&
+                        (it.window ?: "application") == (n.window ?: "application")
+                }
+                if (!dup) plain.add(n)
+            }
+            // Popups first; ime rows are collapsed on the link page (not listed individually).
+            val rank = { w: String? -> when (w) { "popup" -> 0; "system" -> 1; "other" -> 2; "ime" -> 3; else -> 4 } }
+            return plain.sortedWith(compareBy({ rank(it.window) }, { it.bounds?.getOrNull(1) ?: it.y }, { it.bounds?.getOrNull(0) ?: it.x }))
         }
     }
 

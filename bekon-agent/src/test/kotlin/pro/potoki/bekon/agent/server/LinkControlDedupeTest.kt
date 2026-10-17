@@ -123,4 +123,49 @@ class LinkControlDedupeTest {
         assertTrue(html.contains("shot.jpg?v="))
         assertTrue(html.indexOf("[popup]") < html.indexOf("Body"))
     }
+
+    @Test
+    fun `identical non-actionable text deduped without overlap`() {
+        val a = n("e1", "Bekon Agent", 40, 80, 300, 140, clickable = false, window = "application")
+        val b = n("e2", "Bekon Agent", 40, 400, 300, 460, clickable = false, window = "application")
+        val out = LinkControl.dedupe(listOf(a, b))
+        assertEquals(1, out.size)
+    }
+
+    @Test
+    fun `ime nodes collapsed to one keyboard line`() {
+        UserEvents.drain()
+        val items = listOf(
+            n("k1", "q", 0, 1800, 100, 1900, window = "ime"),
+            n("k2", "w", 100, 1800, 200, 1900, window = "ime"),
+            n("f", "Search", 40, 200, 400, 280, clickable = true, window = "application"),
+        )
+        val ex = object : ActionExecutor {
+            override fun health() = mapOf("capture" to true, "touch" to true)
+            override fun snapshot() = ScreenSnapshot(1080, 2340, 270, 585, items)
+            override fun screenshot(scale: Float, quality: Int, format: String) = JpegFrame(byteArrayOf(1), 1, 1)
+            override fun tap(x: Int, y: Int) = true
+            override fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int) = true
+            override fun longPress(x: Int, y: Int) = true
+            override fun drag(x: Int, y: Int) = true
+            override fun release() = true
+            override fun type(text: String) = true
+            override fun key(name: String, n: Int) = true
+            override fun clipboard(): String? = null
+            override fun nav(action: String) = true
+            override fun foreground() = mapOf("package" to "app")
+        }
+        val g = ClientGate(object : TrustedClients { override fun autoAcceptNext() = false }, { false }, ask = { _, _, _ -> true })
+        val links = LinkControl(ex, g, { false }, { "https://ex.test" }, settleMs = 0, waitMs = 3_000)
+        val start = links.handle("GET", "/link/start", mapOf("client" to "k"))!!
+        val ticket = Regex("""ticket=([A-Za-z0-9_-]+)""").find(start.html!!)!!.groupValues[1]
+        val token = Regex("""/s/([A-Za-z0-9_-]+)/screen""")
+            .find(links.handle("GET", "/link/wait", mapOf("ticket" to ticket))!!.html!!)!!.groupValues[1]
+        val html = links.handle("GET", "/s/$token/screen", emptyMap())!!.html!!
+        assertTrue(html.contains("Keyboard is open"))
+        assertTrue(html.contains("hide keyboard"))
+        assertFalse(html.contains("[ime]"))
+        assertTrue(html.contains("Search"))
+        assertTrue(html.indexOf("<h2>Elements</h2>") < html.indexOf("<script>"))
+    }
 }
