@@ -41,6 +41,7 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
     )
 
     override fun snapshot(): ScreenSnapshot {
+        guardRead()
         val controller = controller()
         if (controller == null) throw CapabilityException("touch: accessibility service not enabled")
         val raw = A11yDump.dumpJson() ?: throw CapabilityException("snapshot: no accessibility tree")
@@ -91,6 +92,7 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
     }
 
     override fun screenshot(scale: Float, quality: Int, format: String): JpegFrame {
+        guardRead()
         val sc = screenCapture ?: throw CapabilityException("capture: media permission not granted")
         val opts = CapturePrefs.resolve(context, hiRes = true, scale = scale, quality = quality, format = format)
         val frame = sc.capture(opts) ?: throw CapabilityException("capture: no frame")
@@ -101,6 +103,7 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
     override fun annotatedScreenshot(
         shapes: List<pro.potoki.bekon.agent.coach.Shape>, scale: Float, quality: Int, format: String,
     ): JpegFrame {
+        guardRead()
         val sc = screenCapture ?: throw CapabilityException("capture: media permission not granted")
         val full = sc.latestBitmap() ?: throw CapabilityException("capture: no frame")
         val (sw, sh) = screenSize
@@ -119,24 +122,24 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
     }
 
     override fun drawOnScreen(shapes: List<pro.potoki.bekon.agent.coach.Shape>, append: Boolean, ttlMs: Long): Boolean =
-        pro.potoki.bekon.agent.coach.CoachOverlay.show(TouchService.active, shapes, append, ttlMs)
+        guardRead().let { true } && pro.potoki.bekon.agent.coach.CoachOverlay.show(TouchService.active, shapes, append, ttlMs)
 
     override fun clearScreen() = pro.potoki.bekon.agent.coach.CoachOverlay.clear()
 
     override fun tap(x: Int, y: Int): Boolean =
-        controller()?.tap(x.toFloat(), y.toFloat())
+        writer()?.tap(x.toFloat(), y.toFloat())
             ?: throw CapabilityException("touch: accessibility service not enabled")
 
     override fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int): Boolean =
-        controller()?.swipe(x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat(), ms.toLong())
+        writer()?.swipe(x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat(), ms.toLong())
             ?: throw CapabilityException("touch: accessibility service not enabled")
 
     override fun longPress(x: Int, y: Int): Boolean =
-        controller()?.longPress(x.toFloat(), y.toFloat())
+        writer()?.longPress(x.toFloat(), y.toFloat())
             ?: throw CapabilityException("touch: accessibility service not enabled")
 
     override fun drag(x: Int, y: Int): Boolean {
-        val c = controller() ?: throw CapabilityException("touch: accessibility service not enabled")
+        val c = writer() ?: throw CapabilityException("touch: accessibility service not enabled")
         return try {
             c.drag(x.toFloat(), y.toFloat())
         } catch (e: Exception) {
@@ -145,14 +148,14 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
     }
 
     override fun release(): Boolean =
-        controller()?.release() ?: throw CapabilityException("touch: accessibility service not enabled")
+        writer()?.release() ?: throw CapabilityException("touch: accessibility service not enabled")
 
     override fun type(text: String): Boolean =
-        controller()?.inputAsKeys(text)
+        writer()?.inputAsKeys(text)
             ?: throw CapabilityException("touch: accessibility service not enabled")
 
     override fun typeText(text: String, replace: Boolean, asKeys: Boolean): Boolean {
-        val c = controller() ?: throw CapabilityException("touch: accessibility service not enabled")
+        val c = writer() ?: throw CapabilityException("touch: accessibility service not enabled")
         return try {
             c.input(text, asKeys = asKeys, replace = replace)
         } catch (e: Exception) {
@@ -161,21 +164,48 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
     }
 
     override fun key(name: String, n: Int): Boolean =
-        controller()?.key(name, n) ?: throw CapabilityException("touch: accessibility service not enabled")
+        writer()?.key(name, n) ?: throw CapabilityException("touch: accessibility service not enabled")
 
     override fun clipboard(): String? {
-        controller() ?: throw CapabilityException("touch: accessibility service not enabled")
-        return controller()?.clipboardText()
+        reader() ?: throw CapabilityException("touch: accessibility service not enabled")
+        return reader()?.clipboardText()
     }
 
     override fun nav(action: String): Boolean {
-        val c = controller() ?: throw CapabilityException("touch: accessibility service not enabled")
+        val c = writer() ?: throw CapabilityException("touch: accessibility service not enabled")
         return when (NavAction.fromWire(action)) {
             NavAction.HOME -> c.home()
             NavAction.BACK -> c.back()
             NavAction.RECENTS -> c.recentApps()
             null -> throw CapabilityException("unknown nav action")
         }
+    }
+
+    private fun writer(): TouchController? { guardWrite(); return controller() }
+    private fun reader(): TouchController? { guardRead(); return controller() }
+
+    /**
+     * Last line of defence, below MCP/HTTP gating: covers coach scripts and long-running calls that were
+     * started before the owner pressed Pause / Read-only / Stop. Reads need a live, unpaused session;
+     * writes additionally need read-only off.
+     */
+    private fun guardRead() {
+        val st = pro.potoki.bekon.agent.session.SessionService.state.value
+        if (st.phase != pro.potoki.bekon.agent.SessionPhase.SERVING && st.phase != pro.potoki.bekon.agent.SessionPhase.STARTING)
+            throw CapabilityException("session_stopped: the owner stopped the Bekon session")
+        if (st.paused) throw CapabilityException(pro.potoki.bekon.agent.access.ClientGate.PAUSED)
+    }
+    private fun guardWrite() {
+        guardRead()
+        if (pro.potoki.bekon.agent.session.SessionService.state.value.readOnly)
+            throw CapabilityException(pro.potoki.bekon.agent.mcp.McpHandler.READ_ONLY)
+    }
+
+    /** Stop: end MediaProjection and the virtual display, not just the server. */
+    fun releaseCapture() {
+        try { screenCapture?.stop() } catch (_: Exception) {}
+        screenCapture = null
+        captureStarted = false
     }
 
     private fun controller(): TouchController? = TouchService.active?.controller

@@ -15,6 +15,9 @@ class PrefsTrustedClients(context: Context) : TrustedClients {
         prefs.edit().putStringSet(IDS, trusted() + id).apply()
     }
 
+    /** Owner action: every agent must be approved again. */
+    fun forgetAll() { prefs.edit().remove(IDS).apply() }
+
     fun setAutoAcceptNext(on: Boolean) {
         prefs.edit().putBoolean(AUTO, on).apply()
     }

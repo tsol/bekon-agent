@@ -595,6 +595,14 @@ private fun SettingsMenuButton() {
                 onClick = { open = false; pro.potoki.bekon.agent.ui.SourceCode.open(ctx) },
             )
             DropdownMenuItem(
+                text = { Text(stringResource(R.string.forget_agents)) },
+                onClick = {
+                    open = false
+                    PrefsTrustedClients(ctx).forgetAll()
+                    Toast.makeText(ctx, ctx.getString(R.string.forget_agents_done), Toast.LENGTH_SHORT).show()
+                },
+            )
+            DropdownMenuItem(
                 text = { Text(stringResource(R.string.home_app_info)) },
                 onClick = {
                     open = false

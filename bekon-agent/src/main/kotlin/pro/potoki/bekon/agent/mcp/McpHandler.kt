@@ -67,6 +67,7 @@ class McpHandler(
         val WRITE_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
             "coach_draw", "coach_clear", "open_setup_screen", "coach_script", "coach_script_stop", "scan_list",
+            "open_url", "shortcut_add", "shortcut_remove",
         )
     }
 
@@ -247,6 +248,11 @@ class McpHandler(
                         if (k == "pages" && v is kotlinx.serialization.json.JsonArray) { v.forEach { (it as? JsonObject)?.let(pageImgs::add) }; JsonPrimitive("${v.size} image(s) in content") }
                         else if (v is JsonObject) strip(v) else v })
                     val raw0 = callTool(name, args)
+                    // Long calls (wait_for_change, coach scripts) may finish after Pause/Stop: drop their result.
+                    pro.potoki.bekon.agent.session.SessionService.state.value.let { st ->
+                        if (st.paused) throw CapabilityException(pro.potoki.bekon.agent.access.ClientGate.PAUSED)
+                        if (!st.isRunning) throw CapabilityException("session_stopped: the owner stopped the Bekon session")
+                    }
                     val raw = if (name == "screenshot" || name == "annotate_screenshot") raw0 else strip(raw0)
                     val shot = (raw["screenshot"] as? JsonObject)
                     val data = if (shot != null) JsonObject(raw.filterKeys { it != "screenshot" }) else raw

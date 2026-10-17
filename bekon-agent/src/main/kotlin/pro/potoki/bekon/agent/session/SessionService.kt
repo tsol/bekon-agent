@@ -90,6 +90,7 @@ class SessionService : Service() {
         fun setPaused(paused: Boolean) {
             if (!_state.value.isRunning) return
             _state.value = _state.value.copy(paused = paused)
+            if (paused) try { pro.potoki.bekon.agent.status.UserEvents.stopCoaching?.invoke() } catch (_: Exception) {}
             instance?.updateNotification(statusText())
         }
 
@@ -97,6 +98,7 @@ class SessionService : Service() {
         fun setReadOnly(on: Boolean) {
             if (!_state.value.isRunning) return
             _state.value = _state.value.copy(readOnly = on)
+            if (on) try { pro.potoki.bekon.agent.status.UserEvents.stopCoaching?.invoke() } catch (_: Exception) {}
             instance?.updateNotification(statusText())
         }
 
@@ -255,6 +257,8 @@ class SessionService : Service() {
     private fun stopSession() {
         pro.potoki.bekon.agent.access.AgentConnections.clear()
         Log.i(TAG, "stopSession")
+        try { pro.potoki.bekon.agent.status.UserEvents.stopCoaching?.invoke() } catch (_: Exception) {}
+        try { executor?.releaseCapture() } catch (_: Exception) {}
         supervisor?.stop()
         supervisor = null
         try { tunnel?.stop() } catch (_: Exception) {}
@@ -424,6 +428,7 @@ class SessionService : Service() {
         try { tunnel?.stop() } catch (e: Exception) { Log.w(TAG, "tunnel stop ${e.message}") }
         try { server?.stop() } catch (e: Exception) { Log.w(TAG, "server stop ${e.message}") }
         pro.potoki.bekon.agent.device.capture.ScreenCapture.onSystemStop = null
+        try { executor?.releaseCapture() } catch (_: Exception) {}
         scope.cancel()
         pro.potoki.bekon.agent.status.AgentStatus.clear()
         _state.value = HomeState()
