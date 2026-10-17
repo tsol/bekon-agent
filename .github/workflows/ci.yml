@@ -20,4 +20,4 @@ jobs:
           distribution: temurin
           java-version: "21"
       - name: Build
-        run: ./gradlew :bekon-agent:assembleDebug :bekon-agent:testDebugUnitTest --no-daemon
+        run: ./gradlew :bekon-agent:assemblePlayStoreDebug :bekon-agent:testPlayStoreDebugUnitTest --no-daemon

@@ -598,7 +598,7 @@ private fun SettingsMenuButton() {
                 text = { Text(stringResource(R.string.forget_agents)) },
                 onClick = {
                     open = false
-                    PrefsTrustedClients(ctx).forgetAll()
+                    SessionService.revokeAgents()
                     Toast.makeText(ctx, ctx.getString(R.string.forget_agents_done), Toast.LENGTH_SHORT).show()
                 },
             )

@@ -36,6 +36,8 @@ class McpHandler(
     private val executor: ActionExecutor,
     private val gate: ClientGate? = null,
     private val readOnly: () -> Boolean = { false },
+    /** Rejection reason when the session was paused/stopped while a call ran (null = still live). */
+    private val liveCheck: () -> String? = { null },
     private val shortcuts: ShortcutStore? = null,
     private val coach: pro.potoki.bekon.agent.coach.CoachSurface? = executor as? pro.potoki.bekon.agent.coach.CoachSurface,
     private val setup: pro.potoki.bekon.agent.setup.DeviceSetupGuide? = null,
@@ -64,6 +66,9 @@ class McpHandler(
                 "The pill also shows live capabilities (sees screen / can tap / paused), also returned as capabilities in agent_status and connection_info: trust them, not assumptions. " +
                 "Write the text in the HUMAN's language: use deviceInfo.language from initialize/connection_info/agent_status (device locale, e.g. ru = Russian) unless the human writes to you in another language. Keep it under ~60 characters."
         const val READ_ONLY = "device is in read-only mode so this action was declined."
+        const val AUTH_INFO = "Session token: send 'Authorization: Bearer <bekon_session_token>' (or X-Bekon-Token) plus X-Bekon-Client-Id on every request; " +
+            "the token was issued when the owner approved you and ends with the session or when another agent is approved."
+        private val ISSUED_TOKEN = io.ktor.util.AttributeKey<String>("bekon-issued-token")
         val WRITE_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
             "coach_draw", "coach_clear", "open_setup_screen", "coach_script", "coach_script_stop", "scan_list",
@@ -215,10 +220,21 @@ class McpHandler(
             respondJson(call, JsonRpcResponse(id = 0, error = errElement("invalid json"))); return
         }
         val id = req.id
-        val blocked = gate?.rejection(clientIdOf(call, req), clientIp(call))
-        if (blocked != null) {
-            respondJson(call, JsonRpcResponse(id = id, error = errElement(blocked)))
-            return
+        val token = ClientGate.tokenFrom(call.request.headers["Authorization"], call.request.headers[ClientGate.TOKEN_HEADER])
+        when (val d = gate?.check(clientIdOf(call, req), clientIp(call), token)) {
+            is ClientGate.Decision.Reject -> {
+                if (d.status == 401) {
+                    call.response.headers.append("WWW-Authenticate", "Bearer realm=\"bekon\"")
+                    call.respondText(json.encodeToString(JsonRpcResponse.serializer(), JsonRpcResponse(id = id, error = errElement(d.reason))),
+                        ContentType.Application.Json, io.ktor.http.HttpStatusCode.Unauthorized)
+                } else respondJson(call, JsonRpcResponse(id = id, error = errElement(d.reason)))
+                return
+            }
+            is ClientGate.Decision.Allow -> d.issuedToken?.let {
+                call.response.headers.append(ClientGate.TOKEN_HEADER, it)
+                call.attributes.put(ISSUED_TOKEN, it)
+            }
+            null -> {}
         }
         when (req.method) {
             "initialize" -> respondJson(call, JsonRpcResponse(id = id, result = buildJsonObject {
@@ -228,6 +244,7 @@ class McpHandler(
                     put("name", "bekon-agent"); put("version", pro.potoki.bekon.agent.BuildConfig.VERSION_NAME)
                     put("sourceUrl", pro.potoki.bekon.agent.ui.SourceCode.url)
                 })
+                put("auth", AUTH_INFO)
                 put("instructions", pro.potoki.bekon.agent.handoff.AgentGuide.SERVER_INSTRUCTIONS)
                 put("deviceInfo", deviceInfoJson())
             }))
@@ -249,10 +266,7 @@ class McpHandler(
                         else if (v is JsonObject) strip(v) else v })
                     val raw0 = callTool(name, args)
                     // Long calls (wait_for_change, coach scripts) may finish after Pause/Stop: drop their result.
-                    pro.potoki.bekon.agent.session.SessionService.state.value.let { st ->
-                        if (st.paused) throw CapabilityException(pro.potoki.bekon.agent.access.ClientGate.PAUSED)
-                        if (!st.isRunning) throw CapabilityException("session_stopped: the owner stopped the Bekon session")
-                    }
+                    liveCheck()?.let { throw CapabilityException(it) }
                     val raw = if (name == "screenshot" || name == "annotate_screenshot") raw0 else strip(raw0)
                     val shot = (raw["screenshot"] as? JsonObject)
                     val data = if (shot != null) JsonObject(raw.filterKeys { it != "screenshot" }) else raw
@@ -680,6 +694,7 @@ class McpHandler(
                 put("capabilities", pro.potoki.bekon.agent.status.Capabilities.json())
                 put("endpoint", u?.let { pro.potoki.bekon.agent.handoff.Handoff.endpoint(it) } ?: "")
                 put("sourceUrl", pro.potoki.bekon.agent.ui.SourceCode.url)
+                put("auth", AUTH_INFO)
                 put("text", u?.let { pro.potoki.bekon.agent.handoff.Handoff.text(it) } ?: "Bekon Agent MCP (Android remote control). No public tunnel URL yet.")
             }
         }
@@ -1005,7 +1020,14 @@ class McpHandler(
         put("code", -32000); put("message", msg)
     }
 
-    private suspend fun respondJson(call: ApplicationCall, resp: JsonRpcResponse) {
+    private suspend fun respondJson(call: ApplicationCall, resp0: JsonRpcResponse) {
+        // The request that was just approved also carries the new session token in its result.
+        val issued = call.attributes.getOrNull(ISSUED_TOKEN)
+        val r = resp0.result
+        val resp = if (issued != null && r is JsonObject) resp0.copy(result = JsonObject(r + mapOf(
+            ClientGate.TOKEN_FIELD to JsonPrimitive(issued),
+            "bekon_auth" to JsonPrimitive(ClientGate.TOKEN_ISSUED),
+        ))) else resp0
         call.respondText(json.encodeToString(JsonRpcResponse.serializer(), resp), ContentType.Application.Json)
     }
 }

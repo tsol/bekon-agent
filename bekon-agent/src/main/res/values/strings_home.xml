@@ -143,6 +143,6 @@
     <string name="source_code">Source code</string>
     <string name="audit_copied">Prompt copied — send it to your agent</string>
     <string name="audit_prompt">Please review the source code of the Bekon Agent app %1$s installed on my phone: %2$s\n\nAssess security and privacy:\n1) what data leaves the device, where to and when;\n2) how permissions are used (accessibility, screen capture, notifications, keyboard) and whether anything is excessive;\n3) every network endpoint and tunnel the app connects to;\n4) whether Stop, Pause and Read-only really cut access.\nReply briefly: what looks fine and what raises questions, with file references.</string>
-    <string name="forget_agents">Forget approved agents</string>
-    <string name="forget_agents_done">Done: every agent must be approved again</string>
+    <string name="forget_agents">Disconnect agent and revoke access</string>
+    <string name="forget_agents_done">Access revoked — the agent must be approved again</string>
 </resources>

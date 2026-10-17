@@ -88,12 +88,12 @@ class LocalServerTest {
         assertTrue("tap schema has x integer", list.contains("\"x\":{\"type\":\"integer\"}"))
         assertTrue("swipe schema has ms optional", list.contains("\"ms\""))
 
-        // CORS: preflight OPTIONS must get allow-origin so the browser console works
+        // No CORS: browser origins are not served
         val cors = client.get("http://127.0.0.1:$port/health") {
             header("Origin", "http://localhost:5181")
         }
         val allowOrigin = cors.headers["Access-Control-Allow-Origin"]
-        assertTrue("CORS allow-origin present", allowOrigin == "*")
+        assertTrue("no CORS allow-origin", allowOrigin == null)
 
         srv.stop()
         client.close()

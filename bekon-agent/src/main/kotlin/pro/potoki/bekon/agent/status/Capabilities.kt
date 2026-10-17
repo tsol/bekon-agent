@@ -46,6 +46,7 @@ object Capabilities {
         put("canTap", c.canAct)
         put("readOnly", c.readOnly)
         put("paused", c.paused)
+        put("auth", "bearer-session-token")
         c.agent?.let { put("agent", it) }
     }
 }

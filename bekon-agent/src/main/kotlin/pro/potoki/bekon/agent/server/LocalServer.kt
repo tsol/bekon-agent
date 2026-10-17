@@ -56,12 +56,9 @@ class LocalServer(
             // CORS: the browser console calls /mcp cross-origin (Vite dev -> tunnel URL).
             // Javalin-style before{} handler since enableCorsForAllOrigins() is not on Ktor.
             intercept(io.ktor.server.application.ApplicationCallPipeline.Call) {
-                val resp = call.response
-                resp.headers.append("Access-Control-Allow-Origin", "*")
-                resp.headers.append("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                resp.headers.append("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, X-Bekon-Client-Id")
+                // No CORS: agents call over plain HTTP; browser origins are not served (no Access-Control-* headers).
                 if (call.request.httpMethod == io.ktor.http.HttpMethod.Options) {
-                    call.respond(HttpStatusCode.OK)
+                    call.respond(HttpStatusCode.MethodNotAllowed)
                     return@intercept
                 }
                 val path = call.request.path()
@@ -78,10 +75,16 @@ class LocalServer(
                     val ip = headers["CF-Connecting-IP"]?.trim()?.takeIf { it.isNotEmpty() }
                         ?: headers["X-Forwarded-For"]?.split(",")?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
                         ?: call.request.local.remoteHost
-                    val reason = g.rejection(headers[ClientGate.HEADER], ip)
-                    if (reason != null) {
-                        call.respond(HttpStatusCode.Forbidden, ErrorResponse(reason))
-                        return@intercept
+                    val token = ClientGate.tokenFrom(headers["Authorization"], headers[ClientGate.TOKEN_HEADER])
+                    when (val d = g.check(headers[ClientGate.HEADER], ip, token)) {
+                        is ClientGate.Decision.Reject -> {
+                            if (d.status == 401) {
+                                call.response.headers.append("WWW-Authenticate", "Bearer realm=\"bekon\"")
+                                call.respond(HttpStatusCode.Unauthorized, ErrorResponse(d.reason))
+                            } else call.respond(HttpStatusCode.Forbidden, ErrorResponse(d.reason))
+                            return@intercept
+                        }
+                        is ClientGate.Decision.Allow -> d.issuedToken?.let { call.response.headers.append(ClientGate.TOKEN_HEADER, it) }
                     }
                 }
                 if (readOnly() && call.request.httpMethod == io.ktor.http.HttpMethod.Post && path in WRITE_PATHS) {

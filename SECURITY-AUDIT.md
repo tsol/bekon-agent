@@ -36,7 +36,11 @@ user_events, clipboard, key, type, nav, shortcuts) goes through `ClientGate.reje
 **One agent at a time.** A second client id needs the owner to approve it as a replacement on the phone; the replaced id is then refused for the rest of the session ([ClientGate.kt:18-26](https://github.com/tsol/bekon-agent/blob/v1.0.9/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/access/ClientGate.kt#L18-L26)).
 New ids always need an explicit Allow: auto-accept is off and is forced off in the Play build ([PrefsTrustedClients.kt:9](https://github.com/tsol/bekon-agent/blob/v1.0.9/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/access/PrefsTrustedClients.kt#L9)).
 
-**Authentication (concern, by design, not changed):** the endpoint has no cryptographic authentication.
+**Authentication — ✅ RESOLVED in [v1.0.11](https://github.com/tsol/bekon-agent/tree/v1.0.11):** the owner's approval now issues a
+per-session bearer token (SecureRandom 32 bytes, base64url, constant-time comparison) bound to the client id. Every later request must
+send it (otherwise 401). It is revoked on Stop, at session end, on "Disconnect agent" and when a replacement agent is approved.
+Approvals are no longer persisted, and CORS is removed. See [ClientGate.kt](https://github.com/tsol/bekon-agent/blob/v1.0.11/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/access/ClientGate.kt).
+The original v1.0.9 finding was: the endpoint has no cryptographic authentication.
 - Access depends on (a) the random trycloudflare hostname staying secret, and (b) a client id the agent picks itself and the owner approves once.
 - Anyone who learns **both** the URL and an approved id can connect, and approved ids are remembered across sessions.
 - Mitigations:
@@ -67,3 +71,9 @@ No SYSTEM_ALERT_WINDOW, contacts, SMS, location, storage or camera/mic permissio
 4. Stop releases MediaProjection and the VirtualDisplay (`releaseCapture()`), both on Stop and when the service is destroyed.
 5. `open_url`, `shortcut_add` and `shortcut_remove` are now write tools, blocked in read-only mode.
 6. Settings → "Forget approved agents".
+
+## Fixes in v1.0.11
+7. Per-session bearer token issued on approval, as described above (resolves the authentication concern).
+8. Approved client ids are no longer persisted; ids stored by older versions are deleted on upgrade.
+9. CORS removed: no `Access-Control-*` headers, and OPTIONS returns 405.
+10. CI fixed to use the flavored tasks (`assemblePlayStoreDebug`, `testPlayStoreDebugUnitTest`); `ClientGateTest` covers the token rules.

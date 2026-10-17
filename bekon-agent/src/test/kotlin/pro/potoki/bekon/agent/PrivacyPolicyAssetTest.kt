@@ -13,10 +13,18 @@ class PrivacyPolicyAssetTest {
             .map { File(it, rel) }.firstOrNull { it.isFile }
             ?: error("not found: $rel")
 
+    private fun tryFind(rel: String): File? =
+        generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, rel) }.firstOrNull { it.isFile }
+
     @Test
     fun bundledPolicyMatchesPublishedCopy() {
-        val asset = find("apps/bekon-agent/src/main/assets/${PrivacyPolicy.ASSET}")
-        val published = find("play-store-pack/privacy.html")
+        // Only meaningful inside the monorepo (play-store-pack/ is not published with the standalone app repo).
+        val published = tryFind("play-store-pack/privacy.html")
+        org.junit.Assume.assumeTrue("play-store-pack not present (standalone repo)", published != null)
+        val asset = tryFind("apps/bekon-agent/src/main/assets/${PrivacyPolicy.ASSET}")
+            ?: find("bekon-agent/src/main/assets/${PrivacyPolicy.ASSET}")
+        published!!
         assertEquals("update src/main/assets/privacy.html from play-store-pack/privacy.html", published.readText(), asset.readText())
     }
 

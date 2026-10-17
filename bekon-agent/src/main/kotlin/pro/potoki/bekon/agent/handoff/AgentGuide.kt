@@ -40,8 +40,20 @@ curl -s $mcp -H 'Content-Type: application/json' -H '$hdr: my-agent-1' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"my-agent","version":"1","uniqueId":"my-agent-1"}}}'
 ```
 
-- A new id must be approved by the owner on the phone (a prompt appears). If you get "access declined"
-  or the call waits, ask the human to tap Allow on the phone, then retry. Accepted ids are remembered.
+- A new id must be approved by the owner on the phone (a prompt appears; the call waits). If you get
+  "access declined", ask the human to tap Allow on the phone, then retry.
+- **Session token.** The approved response contains `bekon_session_token` (also in the `X-Bekon-Token`
+  response header). Send it on EVERY later request:
+  `Authorization: Bearer <token>`  (or `X-Bekon-Token: <token>`), together with `$hdr`.
+  Without it an approved id gets HTTP 401. The token ends when the session stops or the owner approves
+  another agent; then call `initialize` again WITHOUT a token to be approved again. Nothing is remembered
+  between sessions.
+
+```
+curl -s $mcp -H 'Content-Type: application/json' -H '$hdr: my-agent-1' \
+  -H 'Authorization: Bearer <bekon_session_token>' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+```
 - Then `tools/list`, then `tools/call` with `{"name": "...", "arguments": {...}}`.
 - Start with `connection_info`, `device_setup_guide` (what is still off) and `shortcuts`.
 
@@ -114,6 +126,7 @@ ${SERVER_INSTRUCTIONS}
 
     /** Short hint for GET /mcp without a JSON-RPC body. */
     const val MCP_GET_HINT =
-        "Bekon MCP endpoint: POST JSON-RPC 2.0 here with header ${ClientGate.HEADER}: <stable-id>. " +
+        "Bekon MCP endpoint: POST JSON-RPC 2.0 here with header ${ClientGate.HEADER}: <stable-id>; after the owner approves you, " +
+            "also send Authorization: Bearer <bekon_session_token> from the approved response. " +
             "Read GET / (this server's root) first for full instructions."
 }

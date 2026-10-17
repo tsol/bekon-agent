@@ -87,6 +87,12 @@ class SessionService : Service() {
             context.startService(i)
         }
 
+        /** Owner action: drop the connected agent and its session token; it must be approved again. */
+        fun revokeAgents() {
+            instance?.gate?.reset()
+            pro.potoki.bekon.agent.access.AgentConnections.clear()
+        }
+
         fun setPaused(paused: Boolean) {
             if (!_state.value.isRunning) return
             _state.value = _state.value.copy(paused = paused)
@@ -200,6 +206,14 @@ class SessionService : Service() {
                 val mcp = McpHandler(
                     ex, gate,
                     readOnly = { _state.value.readOnly },
+                    liveCheck = {
+                        val st = _state.value
+                        when {
+                            st.paused -> ClientGate.PAUSED
+                            !st.isRunning -> "session_stopped: the owner stopped the Bekon session"
+                            else -> null
+                        }
+                    },
                     shortcuts = pro.potoki.bekon.agent.shortcuts.ShortcutStore(applicationContext),
                     setup = pro.potoki.bekon.agent.setup.DeviceSetupGuide(applicationContext) { _state.value.captureGranted },
                 )
@@ -256,6 +270,7 @@ class SessionService : Service() {
 
     private fun stopSession() {
         pro.potoki.bekon.agent.access.AgentConnections.clear()
+        gate?.reset()
         Log.i(TAG, "stopSession")
         try { pro.potoki.bekon.agent.status.UserEvents.stopCoaching?.invoke() } catch (_: Exception) {}
         try { executor?.releaseCapture() } catch (_: Exception) {}

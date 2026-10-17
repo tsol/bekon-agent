@@ -23,6 +23,21 @@ Hand that link to your AI agent and ask it to review:
 3. Which permissions are requested and why — `bekon-agent/src/main/AndroidManifest.xml`.
 4. That the Stop button, pause and read-only modes really cut access.
 
+## Connecting an agent (auth)
+
+The tunnel URL stays clean. Authentication is a per-session token issued by the phone after the owner approves:
+
+1. The agent sends `initialize` (or any request) with header `X-Bekon-Client-Id: <stable-id>` and no token.
+   The phone shows an approval prompt; the request waits.
+2. On **Allow**, the response carries `bekon_session_token` (32 random bytes, base64url) in the JSON-RPC result
+   and in the `X-Bekon-Token` response header.
+3. Every later request sends `Authorization: Bearer <token>` (or `X-Bekon-Token: <token>`) plus the client id.
+   Without a valid token an approved id gets **HTTP 401**; the owner is not re-prompted silently.
+4. The token lives only in memory and ends on Stop, when the session ends, when the owner taps
+   "Disconnect agent", or when another agent is approved as a replacement. Approvals are never remembered across sessions.
+
+No CORS headers are sent; the endpoint is for agents, not browser pages.
+
 ## Build
 
 Requires JDK 17+ and the Android SDK (`sdk.dir` in `local.properties`).
