@@ -43,16 +43,16 @@ class LinkControl(
     class Page(val status: Int, val html: String? = null, val jpeg: ByteArray? = null)
 
     private sealed class Act(val what: String) {
-        class Tap(val x: Int, val y: Int, label: String) : Act("tapped \"$label\"")
-        class Long(val x: Int, val y: Int, label: String) : Act("long-pressed \"$label\"")
-        class Type(val x: Int, val y: Int, label: String) : Act("typed into \"$label\"")
+        class Tap(val x: Int, val y: Int, label: String) : Act("tapped: ${label.take(80)}")
+        class Long(val x: Int, val y: Int, label: String) : Act("long-pressed: ${label.take(80)}")
+        class Type(val x: Int, val y: Int, label: String) : Act("typed into: ${label.take(80)}")
         class Swipe(val x1: Int, val y1: Int, val x2: Int, val y2: Int, dir: String) : Act("scrolled $dir")
         class Nav(val action: String) : Act("nav $action")
-        class Open(val pkg: String, label: String) : Act("opened \"$label\"")
+        class Open(val pkg: String, label: String) : Act("opened: ${label.take(80)}")
         class Highlight(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val label: String) :
-            Act("highlighted \"$label\"")
+            Act("highlighted: ${label.take(80)}")
         class Arrow(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val label: String) :
-            Act("pointed at \"$label\"")
+            Act("pointed at: ${label.take(80)}")
         class Hint(val x: Float, val y: Float, val text: String) : Act("showed hint")
         object Clear : Act("cleared highlights")
     }
@@ -165,7 +165,7 @@ class LinkControl(
                 val snap = executor.snapshot()
                 val snapId = rand().take(10)
                 val imeOpen = snap.items.any { it.window == "ime" }
-                val items = dedupe(snap.items)
+                val items = prepareForLink(snap.items, imeOpen)
                 val fg = executor.foreground()
                 val pkg = fg["package"] ?: "?"
                 val title = fg["title"] ?: fg["activity"] ?: ""
@@ -217,7 +217,7 @@ class LinkControl(
                     sb.append("<li>")
                     val win = n.window?.takeIf { it.isNotBlank() && it != "application" }
                     if (win != null) sb.append("<b>[${esc(win)}]</b> ")
-                    sb.append(esc(n.label.ifBlank { "(unnamed)" }))
+                    sb.append(esc(displayLabel(n)))
                     if (n.clickable || n.checkable) sb.append(" <i>[actionable]</i>")
                     if (n.checkable) sb.append(if (n.checked) " ✓" else " ○")
                     val b = n.bounds
@@ -412,23 +412,29 @@ class LinkControl(
     private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
     private fun html(code: Int, body: String) = Page(code, "<!doctype html><html><head><meta charset=utf-8></head><body>$body</body></html>")
     companion object {
-        /**
-         * Merge duplicate / nested labels: same text (or one blank) with overlapping or contained bounds
-         * collapses to one entry, preferring the clickable (or larger) node. Drops empty non-informative nodes
-         * and status-bar chrome. Popup/system/ime windows are kept and sorted above the main app list.
-         */
+        private val NAV_LABELS = setOf(
+            "назад", "back", "домой", "home", "последние", "recents", "recent apps", "overview",
+        )
+        private val A11Y_LABELS = listOf("специальные возможности", "accessibility")
+
+        /** Dedupe + drop system chrome / bare "clickable" + truncate long bubbles. */
+        fun prepareForLink(items: List<pro.potoki.bekon.agent.core.UiNode>, imeOpen: Boolean): List<pro.potoki.bekon.agent.core.UiNode> =
+            dedupe(items).mapNotNull { n ->
+                if (isSystemNoise(n, imeOpen)) return@mapNotNull null
+                if (n.window == "ime") return@mapNotNull null
+                val lab = polishLabel(n) ?: return@mapNotNull null
+                if (lab == n.label) n else n.copy(label = lab)
+            }
+
         fun dedupe(items: List<pro.potoki.bekon.agent.core.UiNode>): List<pro.potoki.bekon.agent.core.UiNode> {
             fun key(n: pro.potoki.bekon.agent.core.UiNode) = n.label.trim().lowercase()
             fun area(b: IntArray?) = if (b == null || b.size != 4) 0 else (b[2] - b[0]).coerceAtLeast(0) * (b[3] - b[1]).coerceAtLeast(0)
-            fun contains(a: IntArray, b: IntArray): Boolean =
-                a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3]
-            fun overlaps(a: IntArray, b: IntArray): Boolean =
-                a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+            fun contains(a: IntArray, b: IntArray) = a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3]
+            fun overlaps(a: IntArray, b: IntArray) = a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
             fun informative(n: pro.potoki.bekon.agent.core.UiNode): Boolean {
                 if (n.statusBar) return false
                 val lab = n.label.trim()
                 if (lab.isEmpty() || lab == "(unnamed)") return n.clickable || n.checkable
-                // Skip pure whitespace / single punctuation noise
                 if (lab.length <= 1 && !n.clickable && !n.checkable) return false
                 return true
             }
@@ -451,7 +457,6 @@ class LinkControl(
                     if (nest && (sameText || key(n).isEmpty() || key(k).isEmpty() ||
                             (nb != null && kb != null && (contains(kb, nb) || contains(nb, kb))))) {
                         kept[i] = better(k, n).let { win ->
-                            // Prefer popup window tag if either side is a popup/dialog.
                             val w = listOfNotNull(k.window, n.window).firstOrNull { it != "application" } ?: win.window
                             if (w == win.window) win else win.copy(window = w)
                         }
@@ -461,7 +466,6 @@ class LinkControl(
                 }
                 if (!merged) kept.add(n)
             }
-            // Same plain-text label in the same window (toolbar title + content title): keep first non-actionable.
             val plain = ArrayList<pro.potoki.bekon.agent.core.UiNode>()
             for (n in kept) {
                 val actionable = n.clickable || n.checkable
@@ -471,10 +475,31 @@ class LinkControl(
                 }
                 if (!dup) plain.add(n)
             }
-            // Popups first; ime rows are collapsed on the link page (not listed individually).
             val rank = { w: String? -> when (w) { "popup" -> 0; "system" -> 1; "other" -> 2; "ime" -> 3; else -> 4 } }
             return plain.sortedWith(compareBy({ rank(it.window) }, { it.bounds?.getOrNull(1) ?: it.y }, { it.bounds?.getOrNull(0) ?: it.x }))
         }
-    }
 
+        /** System nav / a11y / IME-switcher — covered by Nav + keyboard lines. */
+        fun isSystemNoise(n: pro.potoki.bekon.agent.core.UiNode, imeOpen: Boolean): Boolean {
+            if (n.window != "system") return false
+            val lab = n.label.trim().lowercase()
+            if (lab in NAV_LABELS) return true
+            if (A11Y_LABELS.any { it in lab }) return true
+            if ("голосовой" in lab || "voice" in lab || ("ввод" in lab && "google" in lab) ||
+                "gboard" in lab || "keyboard" in lab || "клавиатур" in lab) return true
+            return true // drop remaining system chrome
+        }
+
+        /** Null => omit from the link list. */
+        fun polishLabel(n: pro.potoki.bekon.agent.core.UiNode): String? {
+            var lab = n.label.trim()
+            if (lab.isEmpty() || lab == "(unnamed)" || lab.equals("clickable", ignoreCase = true)) {
+                lab = pro.potoki.bekon.agent.core.NodeNameResolver.fromIdClass(n.viewId, n.cls) ?: return null
+            }
+            if (lab.length > 120) lab = lab.take(117).trimEnd() + "…"
+            return lab
+        }
+
+        fun displayLabel(n: pro.potoki.bekon.agent.core.UiNode): String = n.label.ifBlank { "(unnamed)" }
+    }
 }

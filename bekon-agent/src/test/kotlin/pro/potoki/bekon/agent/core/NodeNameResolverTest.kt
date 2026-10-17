@@ -42,6 +42,15 @@ class NodeNameResolverTest {
     }
 
     @Test
+    fun `unlabeled control uses class and view id`() {
+        val name = NodeNameResolver.resolve(
+            intArrayOf(1000, 2000, 1040, 2030), null, null, true, all,
+            viewId = "com.app:id/send", cls = "android.widget.ImageButton",
+        )
+        assertEquals("button (id: send)", name)
+    }
+
+    @Test
     fun `bare switch takes the label of its row`() {
         val row = listOf(
             (intArrayOf(0, 1409, 1080, 1579) to "Bekon Agent"),

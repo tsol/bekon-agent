@@ -17,6 +17,9 @@ data class UiNode(
     val statusBar: Boolean = false,
     /** application / popup / system / ime / other — from accessibility window type. */
     val window: String? = null,
+    /** view id / class from a11y (for unlabeled controls). */
+    val viewId: String? = null,
+    val cls: String? = null,
 )
 
 /**

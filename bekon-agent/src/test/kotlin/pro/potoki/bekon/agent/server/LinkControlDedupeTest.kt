@@ -168,4 +168,57 @@ class LinkControlDedupeTest {
         assertTrue(html.contains("Search"))
         assertTrue(html.indexOf("<h2>Elements</h2>") < html.indexOf("<script>"))
     }
+
+    @Test
+    fun `prepareForLink drops system nav and clickable and truncates`() {
+        val items = listOf(
+            n("s1", "Назад", 800, 2200, 1000, 2340, clickable = true, window = "system"),
+            n("s2", "Домой", 500, 2200, 700, 2340, clickable = true, window = "system"),
+            n("s3", "Последние", 200, 2200, 400, 2340, clickable = true, window = "system"),
+            n("s4", "Специальные возможности", 1000, 2200, 1080, 2340, clickable = true, window = "system"),
+            n("s5", "Выключено, Голосовой ввод Google", 0, 2200, 120, 2340, clickable = true, window = "system"),
+            n("c1", "clickable", 10, 10, 80, 80, clickable = true, window = "application"),
+            n("m1", "A".repeat(200), 0, 100, 400, 400, clickable = true, window = "application"),
+            n("ok", "Send", 0, 500, 100, 560, clickable = true, window = "application"),
+        )
+        val out = LinkControl.prepareForLink(items, imeOpen = true)
+        assertTrue(out.none { it.window == "system" })
+        assertTrue(out.none { it.label.equals("clickable", true) })
+        assertTrue(out.any { it.label == "Send" })
+        val long = out.first { it.label.startsWith("A") }
+        assertTrue(long.label.length <= 120 && long.label.endsWith("…"))
+    }
+
+    @Test
+    fun `action note has no html entities for quotes`() {
+        UserEvents.drain()
+        val items = listOf(n("e1", "More", 10, 10, 100, 80, clickable = true, window = "application"))
+        val ex = object : ActionExecutor {
+            override fun health() = mapOf("capture" to true, "touch" to true)
+            override fun snapshot() = ScreenSnapshot(1080, 2340, 270, 585, items)
+            override fun screenshot(scale: Float, quality: Int, format: String) = JpegFrame(byteArrayOf(1), 1, 1)
+            override fun tap(x: Int, y: Int) = true
+            override fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int) = true
+            override fun longPress(x: Int, y: Int) = true
+            override fun drag(x: Int, y: Int) = true
+            override fun release() = true
+            override fun type(text: String) = true
+            override fun key(name: String, n: Int) = true
+            override fun clipboard(): String? = null
+            override fun nav(action: String) = true
+            override fun foreground() = mapOf("package" to "app")
+        }
+        val g = ClientGate(object : TrustedClients { override fun autoAcceptNext() = false }, { false }, ask = { _, _, _ -> true })
+        val links = LinkControl(ex, g, { false }, { "https://ex.test" }, settleMs = 0, waitMs = 3_000)
+        val start = links.handle("GET", "/link/start", mapOf("client" to "n"))!!
+        val ticket = Regex("""ticket=([A-Za-z0-9_-]+)""").find(start.html!!)!!.groupValues[1]
+        val token = Regex("""/s/([A-Za-z0-9_-]+)/screen""")
+            .find(links.handle("GET", "/link/wait", mapOf("ticket" to ticket))!!.html!!)!!.groupValues[1]
+        val screen = links.handle("GET", "/s/$token/screen", emptyMap())!!.html!!
+        val tap = Regex("""href="https://ex\.test(/s/$token/do/[^"]+)">tap""").find(screen)!!.groupValues[1]
+        val after = links.handle("GET", tap, emptyMap())!!.html!!
+        assertTrue(after.contains("tapped: More"))
+        assertFalse(after.contains("&quot;"))
+        assertFalse(after.contains("&amp;quot;"))
+    }
 }
