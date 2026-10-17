@@ -63,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,6 +83,8 @@ import pro.potoki.bekon.agent.session.SessionService
 
 class MainActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
+    /** Bumped on every resume so the wizard re-reads permission state after Settings. */
+    private val resumeTick = mutableStateOf(0)
     private var bringUp = false
     private var askedCapture = false
     private var askedGestures = false
@@ -104,7 +107,7 @@ class MainActivity : ComponentActivity() {
                         .background(MaterialTheme.colorScheme.background)
                         .safeDrawingPadding(),
                 ) {
-                    BekonHome(state = state, onIntent = ::dispatchIntent)
+                    BekonHome(state = state, tick = resumeTick.value, onIntent = ::dispatchIntent)
                 }
             }
         }
@@ -112,6 +115,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        resumeTick.value++
         if (bringUp) advanceBringUp()
     }
 
@@ -171,11 +175,7 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(this, CapturePermissionActivity::class.java))
             return
         }
-        if (!TouchService.isBound() && !askedGestures) {
-            askedGestures = true
-            Consent.openAccessibilitySettings(this)
-            return
-        }
+        // Gestures etc. are in the wizard checklist: get the human to the agent link first.
         // The Bekon Keys keyboard is optional (typing uses accessibility SET_TEXT); never auto-prompt it.
         SessionService.instance?.reconcileSteps()
         bringUp = false
@@ -191,7 +191,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
+fun BekonHome(state: HomeState, tick: Int = 0, onIntent: (HomeIntent) -> Unit) {
     var showQr by remember { mutableStateOf(false) }
     var showShortcuts by remember { mutableStateOf(false) }
     val agents by pro.potoki.bekon.agent.access.AgentConnections.connected.collectAsState()
@@ -225,69 +225,35 @@ fun BekonHome(state: HomeState, onIntent: (HomeIntent) -> Unit) {
                 ) {
                     Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "Remote session active — the connected agent can see the screen and act on this phone.",
+                            stringResource(R.string.home_session_active),
                             Modifier.weight(1f),
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Spacer(Modifier.width(8.dp))
-                        Button(onClick = { onIntent(HomeIntent.Stop) }) { Text("Stop") }
+                        Button(onClick = { onIntent(HomeIntent.Stop) }) { Text(stringResource(R.string.home_stop)) }
                     }
                 }
             }
-            if (state.isRunning) AgentsCard(agents, state.canShowQr) { showQr = true }
-            Card(Modifier.padding(vertical = 8.dp)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusRow("Screen", pill(state.captureGranted), dimmed = state.paused) { onIntent(HomeIntent.OpenSettingsScreen(SettingsRow.SCREEN)) }
-                    StatusRow("Gestures", pill(state.gesturesOn), dimmed = state.paused || state.readOnly) { onIntent(HomeIntent.OpenSettingsScreen(SettingsRow.GESTURES)) }
-                    if (Consent.imeAvailable()) {
-                        StatusRow("Keyboard (optional)", pill(state.keyboardOn), dimmed = state.paused || state.readOnly) { onIntent(HomeIntent.OpenSettingsScreen(SettingsRow.KEYBOARD)) }
-                    }
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Tunnel")
-                        Spacer(Modifier.width(12.dp))
-                        TunnelChoice(state.tunnelKind) { onIntent(HomeIntent.SetTunnelKind(it)) }
-                        Spacer(Modifier.weight(1f))
-                        Text(state.publicUrl?.let { "live" } ?: "off", style = MaterialTheme.typography.bodyMedium)
-                        Spacer(Modifier.width(8.dp))
-                        Text("›", style = MaterialTheme.typography.titleLarge)
-                    }
-                }
-            }
+            if (state.isRunning && agents.isNotEmpty()) AgentsCard(agents, state.canShowQr) { showQr = true }
+            pro.potoki.bekon.agent.ui.SetupWizard(state, agents, tick, onIntent) { showQr = true }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (state.isRunning) {
-                    Button(
-                        onClick = { onIntent(HomeIntent.Stop) },
-                        modifier = Modifier.weight(1f).height(52.dp),
-                    ) { Text("Stop") }
-                } else {
-                    Button(
-                        onClick = { onIntent(HomeIntent.Start) },
-                        enabled = state.canStart,
-                        modifier = Modifier.weight(1f).height(52.dp),
-                    ) { Text("Start") }
-                }
-                if (agents.isEmpty()) OutlinedButton(
-                    onClick = { showQr = true },
-                    enabled = state.canShowQr,
-                    modifier = Modifier.weight(1f).height(52.dp),
-                ) { Text("QR for agent") }
+            if (state.isRunning || state.phase == SessionPhase.STARTING) {
+                Button(
+                    onClick = { onIntent(HomeIntent.Stop) },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                ) { Text(stringResource(R.string.home_stop)) }
             }
 
             state.error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
             }
 
-            // Part B/C: frictionless onboarding checklist — one big CTA, progress N/M.
-            SetupCard(state, onIntent)
+            if (state.phase == SessionPhase.FAILED) SetupCard(state, onIntent)
 
             val ctx = androidx.compose.ui.platform.LocalContext.current
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                TextButton(onClick = { Consent.showDisclosure(ctx, Consent.Kind.A11Y) }) { Text("Accessibility disclosure") }
-                TextButton(onClick = { Consent.openPrivacyPolicy(ctx) }) { Text("Privacy policy") }
+                TextButton(onClick = { Consent.showDisclosure(ctx, Consent.Kind.A11Y) }) { Text(stringResource(R.string.home_a11y_disclosure)) }
+                TextButton(onClick = { Consent.openPrivacyPolicy(ctx) }) { Text(stringResource(R.string.home_privacy)) }
             }
         }
     }
@@ -365,14 +331,14 @@ private fun QrScreen(url: String, onDismiss: () -> Unit, onShortcuts: () -> Unit
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                "Connect your AI agent",
+                stringResource(R.string.qr_title),
                 style = MaterialTheme.typography.headlineSmall,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "Scan with the agent's camera, or copy the text below.",
+                stringResource(R.string.qr_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -390,7 +356,7 @@ private fun QrScreen(url: String, onDismiss: () -> Unit, onShortcuts: () -> Unit
             }
             Spacer(Modifier.height(20.dp))
             Text(
-                "Share only with an agent you trust. You approve it on this phone and can stop any time.",
+                stringResource(R.string.qr_trust),
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
@@ -414,18 +380,18 @@ private fun QrScreen(url: String, onDismiss: () -> Unit, onShortcuts: () -> Unit
             Button(
                 onClick = {
                     cm.setPrimaryClip(ClipData.newPlainText("bekon handoff", prompt))
-                    Toast.makeText(context, "Agent prompt + link copied", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.qr_copied_agent), Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
-            ) { Text("Copy for agent") }
+            ) { Text(stringResource(R.string.qr_copy_agent)) }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = {
                     cm.setPrimaryClip(ClipData.newPlainText("bekon url", url))
-                    Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.qr_copied_url), Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
-            ) { Text("Copy URL only") }
+            ) { Text(stringResource(R.string.qr_copy_url)) }
             Spacer(Modifier.height(20.dp))
             val prefs = remember { PrefsTrustedClients(context) }
             var autoAccept by remember { mutableStateOf(prefs.autoAcceptNext()) }
@@ -443,16 +409,16 @@ private fun QrScreen(url: String, onDismiss: () -> Unit, onShortcuts: () -> Unit
             ) {
                 Checkbox(checked = autoAccept, onCheckedChange = null)
                 Text(
-                    "Auto accept and remember next connection",
+                    stringResource(R.string.qr_auto_accept),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.weight(1f),
                 )
             }
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onDismiss) { Text("Close") }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.qr_close)) }
                 Text("|", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = onShortcuts) { Text("Shortcuts") }
+                TextButton(onClick = onShortcuts) { Text(stringResource(R.string.qr_shortcuts)) }
             }
         }
     }
@@ -468,14 +434,14 @@ private fun HomeFooter(state: HomeState, onIntent: (HomeIntent) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             FooterButton(
-                label = if (state.paused) "Resume" else "Pause",
+                label = if (state.paused) stringResource(R.string.home_resume) else stringResource(R.string.home_pause),
                 icon = if (state.paused) R.drawable.ic_play else R.drawable.ic_pause,
                 selected = state.paused,
                 enabled = state.isRunning,
                 onClick = { onIntent(if (state.paused) HomeIntent.Resume else HomeIntent.Pause) },
             )
             FooterButton(
-                label = "Read only",
+                label = stringResource(R.string.home_read_only),
                 icon = R.drawable.ic_visibility,
                 selected = state.readOnly,
                 enabled = state.isRunning,
@@ -540,10 +506,10 @@ private fun SetupCard(state: HomeState, onIntent: (HomeIntent) -> Unit) {
     if (state.phase == SessionPhase.FAILED) {
         Card {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Session failed", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.home_session_failed), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
                 state.error?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                 Button(onClick = { onIntent(HomeIntent.Start) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Retry")
+                    Text(stringResource(R.string.home_retry))
                 }
             }
         }
@@ -609,24 +575,24 @@ private fun SettingsMenuButton() {
     var open by remember { mutableStateOf(false) }
     Box {
         FooterButton(
-            label = "Settings",
+            label = stringResource(R.string.home_settings),
             icon = R.drawable.ic_settings,
             selected = open,
             enabled = true,
             onClick = { open = true },
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text("Privacy policy") }, onClick = { open = false; Consent.openPrivacyPolicy(ctx) })
+            DropdownMenuItem(text = { Text(stringResource(R.string.home_privacy)) }, onClick = { open = false; Consent.openPrivacyPolicy(ctx) })
             DropdownMenuItem(
-                text = { Text("Accessibility disclosure") },
+                text = { Text(stringResource(R.string.home_a11y_disclosure)) },
                 onClick = { open = false; Consent.showDisclosure(ctx, Consent.Kind.A11Y, thenOpenSettings = false) },
             )
             if (Consent.imeAvailable()) DropdownMenuItem(
-                text = { Text("Keyboard disclosure") },
+                text = { Text(stringResource(R.string.home_keyboard_disclosure)) },
                 onClick = { open = false; Consent.showDisclosure(ctx, Consent.Kind.IME, thenOpenSettings = false) },
             )
             DropdownMenuItem(
-                text = { Text("App info (Android settings)") },
+                text = { Text(stringResource(R.string.home_app_info)) },
                 onClick = {
                     open = false
                     Consent.start(
@@ -636,7 +602,7 @@ private fun SettingsMenuButton() {
                 },
             )
             DropdownMenuItem(
-                text = { Text("Version ${BuildConfig.VERSION_NAME} (${if (BuildConfig.PLAY_STORE) "Play" else "full"})") },
+                text = { Text(stringResource(R.string.home_version, BuildConfig.VERSION_NAME, if (BuildConfig.PLAY_STORE) "Play" else "full")) },
                 onClick = { open = false },
                 enabled = false,
             )

@@ -39,7 +39,31 @@ object Consent {
 
     fun openAccessibilitySettings(ctx: Context) {
         if (!accepted(ctx, Kind.A11Y)) return showDisclosure(ctx, Kind.A11Y)
-        start(ctx, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        openAccessibilityDirect(ctx)
+    }
+
+    /**
+     * Land as close as possible to "Bekon Gestures": Android 11+ details screen for our service,
+     * then the list with our row highlighted (AOSP/Pixel/Samsung honour :settings:fragment_args_key),
+     * then the plain list.
+     */
+    fun openAccessibilityDirect(ctx: Context) {
+        val cn = android.content.ComponentName(ctx, pro.potoki.bekon.agent.device.touch.TouchService::class.java).flattenToString()
+        val candidates = buildList {
+            if (android.os.Build.VERSION.SDK_INT >= 30) add(
+                Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS").putExtra(Intent.EXTRA_COMPONENT_NAME, cn),
+            )
+            add(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                val args = android.os.Bundle().apply { putString(":settings:fragment_args_key", cn) }
+                putExtra(":settings:fragment_args_key", cn)
+                putExtra(":settings:show_fragment_args", args)
+            })
+            add(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+        for (i in candidates) {
+            if (ctx !is Activity) i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try { ctx.startActivity(i); return } catch (_: Exception) {}
+        }
     }
 
     fun openKeyboardSettings(ctx: Context) {

@@ -95,8 +95,8 @@ class DisclosureActivity : ComponentActivity() {
         Consent.set(this, kind, true)
         if (kind == Consent.Kind.A11Y) TouchService.instance?.onConsentChanged()
         if (open) {
-            val action = if (kind == Consent.Kind.A11Y) Settings.ACTION_ACCESSIBILITY_SETTINGS else Settings.ACTION_INPUT_METHOD_SETTINGS
-            Consent.start(this, Intent(action))
+            if (kind == Consent.Kind.A11Y) Consent.openAccessibilityDirect(this)
+            else Consent.start(this, Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
         }
         finish()
     }
