@@ -18,6 +18,7 @@ import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.http.withCharset
 import io.ktor.server.routing.get
+import io.ktor.server.routing.head
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.serialization.json.Json
@@ -70,7 +71,7 @@ class LocalServer(
                     return@intercept
                 }
                 val g = gate
-                if (g != null && path != "/health" && path != "/mcp" && path !in GUIDE_PATHS) {
+                if (g != null && path != "/health" && path != "/mcp" && path != "/robots.txt" && path !in GUIDE_PATHS) {
                     val headers = call.request.headers
                     val ip = headers["CF-Connecting-IP"]?.trim()?.takeIf { it.isNotEmpty() }
                         ?: headers["X-Forwarded-For"]?.split(",")?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
@@ -175,6 +176,10 @@ class LocalServer(
                 val base = pro.potoki.bekon.agent.handoff.Handoff.currentUrl
                 call.respondText(pro.potoki.bekon.agent.handoff.AgentGuide.markdown(base), ContentType.Text.Plain.withCharset(Charsets.UTF_8))
             }
+            // Our own robots.txt. On trycloudflare the edge prepends its managed AI-crawler block; ours is appended
+            // after it, so explicit Allow groups for user-triggered agents merge with (and per RFC 9309 win over) it.
+            get("/robots.txt") { call.respondText(pro.potoki.bekon.agent.handoff.AgentGuide.ROBOTS_TXT, ContentType.Text.Plain.withCharset(Charsets.UTF_8)) }
+            for (p in GUIDE_PATHS + listOf("/mcp", "/robots.txt", "/health")) head(p) { call.respond(HttpStatusCode.OK) }
             post("/mcp") { pro.potoki.bekon.agent.access.AgentConnections.busy { mcp.handle(call) } }
             get("/mcp") { mcp.handle(call) }
         }

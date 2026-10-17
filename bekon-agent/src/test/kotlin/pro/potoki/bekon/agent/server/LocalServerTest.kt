@@ -5,6 +5,7 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -44,6 +45,28 @@ class FakeExecutor : ActionExecutor {
 }
 
 class LocalServerTest {
+
+    @Test
+    fun `robots, guide, GET mcp and HEAD answer 200 for readers`() = runBlocking {
+        val port = freePort()
+        val executor = FakeExecutor()
+        val srv = LocalServer(port, executor, McpHandler(executor))
+        srv.start()
+        val client = HttpClient(CIO)
+        val robots = client.get("http://127.0.0.1:$port/robots.txt")
+        assertTrue("robots 200", robots.status.value == 200)
+        val rb = robots.bodyAsText()
+        assertTrue("robots allows user agents", rb.contains("User-agent: ChatGPT-User") && rb.contains("Allow: /") && !rb.contains("Disallow"))
+        val root = client.get("http://127.0.0.1:$port/").bodyAsText()
+        assertTrue("connect block first", root.startsWith("# HOW TO CONNECT") && root.contains("custom MCP connector"))
+        val gm = client.get("http://127.0.0.1:$port/mcp")
+        assertTrue("GET /mcp 200 with hint", gm.status.value == 200 && gm.bodyAsText().contains("custom MCP connector"))
+        for (path in listOf("/", "/mcp", "/robots.txt", "/llms.txt")) {
+            val h = client.request("http://127.0.0.1:$port$path") { method = io.ktor.http.HttpMethod.Head }
+            assertTrue("HEAD $path 200 (was ${h.status.value})", h.status.value == 200)
+        }
+        client.close(); srv.stop()
+    }
 
     @Test
     fun `health and snapshot and tap routes respond`() = runBlocking {

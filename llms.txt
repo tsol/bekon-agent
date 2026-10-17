@@ -1,21 +1,21 @@
 # Bekon Agent
 > Android app that lets an AI agent the owner trusts see and operate the phone over MCP, with consent. Source for auditing.
 
-Audit guide: https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/AUDIT.md
-Zip: https://github.com/tsol/bekon-agent/archive/refs/tags/v1.0.15.zip
+Audit guide: https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/AUDIT.md
+Zip: https://github.com/tsol/bekon-agent/archive/refs/tags/v1.0.16.zip
 
-## Key files (v1.0.15)
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/SECURITY-AUDIT.md
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/AndroidManifest.xml
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/mcp/McpHandler.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/access/ClientGate.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/server/LocalServer.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/session/SessionService.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/tunnel/CloudflareTunnel.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/core/DeviceExecutor.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/device/capture/ScreenCapture.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/status/Capabilities.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/handoff/AgentGuide.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/ui/AuditPrompt.kt
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/src/main/res/xml/accessibility_service_config.xml
-- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.15/bekon-agent/build.gradle.kts
+## Key files (v1.0.16)
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/SECURITY-AUDIT.md
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/AndroidManifest.xml
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/mcp/McpHandler.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/access/ClientGate.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/server/LocalServer.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/session/SessionService.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/tunnel/CloudflareTunnel.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/core/DeviceExecutor.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/device/capture/ScreenCapture.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/status/Capabilities.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/handoff/AgentGuide.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/ui/AuditPrompt.kt
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/src/main/res/xml/accessibility_service_config.xml
+- https://raw.githubusercontent.com/tsol/bekon-agent/v1.0.16/bekon-agent/build.gradle.kts

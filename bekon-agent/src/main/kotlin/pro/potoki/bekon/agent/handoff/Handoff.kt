@@ -17,5 +17,5 @@ object Handoff {
 
     /** Very short, token-efficient prompt encoded in the QR and copied by "Copy for agent". */
     fun text(url: String): String =
-        "Bekon: owner shares Android phone via MCP. Read ${root(url)}/ first."
+        "Bekon: owner shares Android phone via MCP. Read ${root(url)}/ first. MCP endpoint: ${root(url)}/mcp"
 }

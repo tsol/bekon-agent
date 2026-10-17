@@ -16,7 +16,8 @@ object AgentGuide {
         val base = baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/mcp")?.takeIf { it.isNotEmpty() }
         val mcp = base?.let { "$it/mcp" } ?: "/mcp"
         val hdr = ClientGate.HEADER
-        return """
+        return connectBlock(mcp) + """
+
 # Bekon: an Android phone shared with you over MCP
 
 You are reading this because the phone's owner showed you a QR code or link from the Bekon Agent app.
@@ -125,8 +126,41 @@ ${SERVER_INSTRUCTIONS}
     }
 
     /** Short hint for GET /mcp without a JSON-RPC body. */
+    /** Universal "how to connect" block shown first on / , /llms.txt and GET /mcp. No app-specific links. */
+    fun connectBlock(mcp: String): String = """
+# HOW TO CONNECT (read first)
+- If you can make HTTP POST requests: use JSON-RPC 2.0 at $mcp (details below).
+- If your tool can only read web pages (no POST): ask the user to add $mcp as a custom MCP connector
+  (transport: Streamable HTTP, auth: none) in your app's settings, then use its tools.
+  Hints: chat apps usually have Settings -> Connectors / Integrations -> "Add custom connector";
+  IDE/CLI agents usually have an MCP servers config (add a server with type "http" and this URL);
+  automation tools usually offer an "MCP client" / "HTTP Request" node.
+- The owner approves you on the phone; nothing else is needed (no account, no API key).
+""".trimStart()
+
+    const val ROBOTS_TXT = """User-agent: *
+Allow: /
+
+# Bekon: the phone owner shares this link with an AI agent on purpose. User-triggered agents may read it.
+User-agent: ChatGPT-User
+User-agent: OAI-SearchBot
+User-agent: Claude-User
+User-agent: Claude-SearchBot
+User-agent: Perplexity-User
+User-agent: PerplexityBot
+User-agent: Google-Agent
+User-agent: Gemini-Deep-Research
+User-agent: MistralAI-User
+User-agent: DuckAssistBot
+User-agent: Meta-ExternalFetcher
+User-agent: Grok
+Allow: /
+"""
+
     const val MCP_GET_HINT =
         "Bekon MCP endpoint: POST JSON-RPC 2.0 here with header ${ClientGate.HEADER}: <stable-id>; after the owner approves you, " +
             "also send Authorization: Bearer <bekon_session_token> from the approved response. " +
-            "Read GET / (this server's root) first for full instructions."
+            "Read GET / (this server's root) first for full instructions. " +
+            "If you cannot send POST requests (web reader only), ask the user to add this URL as a custom MCP connector " +
+            "(Streamable HTTP, no auth) in your app's settings, then use its tools."
 }
