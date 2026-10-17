@@ -120,21 +120,23 @@ private fun ConnectionCard(
                     Text(stringResource(R.string.conn_missing, stringResource(coreTitle(current))),
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     StepDots(core, ok)
+                    if (state.isRunning || state.phase == SessionPhase.STARTING) StopButton({ onIntent(HomeIntent.Stop) }, Modifier.fillMaxWidth())
                 }
                 ConnState.READY, ConnState.DISCONNECTED -> {
-                    if (!state.publicUrl.isNullOrBlank()) ShareButtons(state.publicUrl, onShowQr)
+                    if (!state.publicUrl.isNullOrBlank()) ShareButtons(state.publicUrl, onShowQr, { onIntent(HomeIntent.Stop) })
+                    else StopButton({ onIntent(HomeIntent.Stop) }, Modifier.fillMaxWidth())
                 }
                 ConnState.CONNECTED -> {
                     // Play policy: always-visible remote-session indicator with one-tap Stop.
                     Text(stringResource(R.string.conn_connected_body), style = MaterialTheme.typography.bodyMedium)
+                    // Same grid as the share row: equal-width buttons, Stop in red (always-visible Stop, Play policy).
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(onClick = { onIntent(HomeIntent.Stop) }) { Text(stringResource(R.string.home_stop)) }
-                        if (state.canShowQr) OutlinedButton(onClick = onShowQr) { Text(stringResource(R.string.show_qr_again)) }
+                        if (state.canShowQr) OutlinedButton(onClick = onShowQr, modifier = Modifier.weight(1f).height(48.dp), contentPadding = TIGHT) {
+                            Text(stringResource(R.string.show_qr_again), maxLines = 1)
+                        }
+                        StopButton({ onIntent(HomeIntent.Stop) }, Modifier.weight(1f))
                     }
                 }
-            }
-            if (cs != ConnState.CONNECTED && (state.isRunning || state.phase == SessionPhase.STARTING)) {
-                OutlinedButton(onClick = { onIntent(HomeIntent.Stop) }) { Text(stringResource(R.string.home_stop)) }
             }
         }
     }
@@ -238,7 +240,7 @@ private fun coreVerb(c: CoreStep, s: HomeState) = when (c) {
 }
 
 @Composable
-private fun ShareButtons(url: String, onShowQr: () -> Unit) {
+private fun ShareButtons(url: String, onShowQr: () -> Unit, onStop: (() -> Unit)?) {
     val ctx = LocalContext.current
     val msg = remember(url) { Handoff.text(url) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -254,10 +256,26 @@ private fun ShareButtons(url: String, onShowQr: () -> Unit) {
                 OutlinedButton(onClick = {
                     val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, msg)
                     ctx.startActivity(Intent.createChooser(send, null))
-                }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.wiz_share)) }
-                OutlinedButton(onClick = onShowQr, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.wiz_show_qr)) }
+                }, modifier = Modifier.weight(1f).height(48.dp), contentPadding = TIGHT) { Text(stringResource(R.string.wiz_share), maxLines = 1) }
+                OutlinedButton(onClick = onShowQr, modifier = Modifier.weight(1f).height(48.dp), contentPadding = TIGHT) { Text(stringResource(R.string.wiz_show_qr), maxLines = 1) }
+                if (onStop != null) StopButton(onStop, Modifier.weight(1f))
             }
         }
     }
 }
 
+
+private val TIGHT = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+
+/** Outlined Stop in the error colour; same height/shape as the other card buttons. */
+@Composable
+private fun StopButton(onStop: () -> Unit, modifier: Modifier) {
+    val err = MaterialTheme.colorScheme.error
+    OutlinedButton(
+        onClick = onStop,
+        modifier = modifier.height(48.dp),
+        contentPadding = TIGHT,
+        border = androidx.compose.foundation.BorderStroke(1.dp, err),
+        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = err),
+    ) { Text(stringResource(R.string.home_stop), maxLines = 1) }
+}
