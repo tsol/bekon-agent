@@ -12,9 +12,11 @@ visible frame, a notification and a one-tap **Stop** are shown for the whole ses
 
 ## Verify this build / ask your agent to audit
 
-Every release is tagged with its version (`v1.0.1` … `v1.0.9`, …). The app's
+Every release is tagged with its version (`v1.0.1` … `v1.0.12`, …). The app's
 "ask your agent to check our code" button opens the tag matching the installed version, for example
 <https://github.com/tsol/bekon-agent/tree/v1.0.9>.
+
+For agents: [AUDIT.md](AUDIT.md) and [llms.txt](llms.txt) list tag-pinned raw links to the key files and a zip.
 
 Hand that link to your AI agent and ask it to review:
 

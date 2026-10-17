@@ -142,7 +142,25 @@
     <string name="audit_ask">Ask your agent to audit the code</string>
     <string name="source_code">Source code</string>
     <string name="audit_copied">Prompt copied — send it to your agent</string>
-    <string name="audit_prompt">Please review the source code of the Bekon Agent app %1$s installed on my phone: %2$s\n\nAssess security and privacy:\n1) what data leaves the device, where to and when;\n2) how permissions are used (accessibility, screen capture, notifications, keyboard) and whether anything is excessive;\n3) every network endpoint and tunnel the app connects to;\n4) whether Stop, Pause and Read-only really cut access.\nReply briefly: what looks fine and what raises questions, with file references.</string>
+    <string name="audit_prompt">Please review the source code of the Bekon Agent app %1$s installed on my phone. This is exactly the installed version (tag v%1$s).
+
+Code: %2$s
+Archive: %3$s
+
+Key files (direct plain-text links, pinned to the tag):
+%4$s
+
+If you cannot open links, say so and ask me to download the archive and upload it to you.
+
+Answer only from the actual code, with file:line references. No generic checklists, no guessing. If you could not read a file, say which one explicitly.
+
+Check:
+1) what data leaves the device, where to and when (every network endpoint and tunnel);
+2) how permissions are used (accessibility, screen capture, notifications) and whether anything is excessive;
+3) how agent access is checked (owner approval, session token) and whether it can be bypassed;
+4) whether Stop, Pause and Read-only really cut access.
+Summary, briefly: what looks fine and what raises questions.</string>
     <string name="forget_agents">Disconnect agent and revoke access</string>
     <string name="forget_agents_done">Access revoked — the agent must be approved again</string>
+    <string name="download_zip">Download code archive</string>
 </resources>
