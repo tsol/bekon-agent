@@ -777,8 +777,24 @@ class LinkControl(
                 lab = pro.potoki.bekon.agent.core.NodeNameResolver.fromIdClass(if (webId) null else n.viewId, n.cls)
                     ?: return null
             }
+            if (isJunkLabel(lab, n)) return null
             if (lab.length > 120) lab = lab.take(117).trimEnd() + "…"
             return lab
+        }
+
+        private val IMAGE_NAME = Regex("""\.(jpe?g|png|gif|webp|svg)(\?|$)""", RegexOption.IGNORE_CASE)
+
+        /**
+         * Web junk: single characters (map/letter-index tiles like "H", "Я") unless a native control with its own
+         * view id, and image file names / raw URLs used as link text. Link page only; MCP output is untouched.
+         */
+        fun isJunkLabel(label: String, n: pro.potoki.bekon.agent.core.UiNode): Boolean {
+            val t = label.trim()
+            if (n.editable) return false
+            if (t.codePointCount(0, t.length) == 1 && !(n.viewId?.contains(":id/") ?: false)) return true
+            if (IMAGE_NAME.containsMatchIn(t)) return true
+            if (t.startsWith("http://", true) || t.startsWith("https://", true) || t.contains("utm_", true)) return true
+            return false
         }
 
         fun displayLabel(n: pro.potoki.bekon.agent.core.UiNode): String = n.label.ifBlank { "(unnamed)" }

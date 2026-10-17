@@ -446,4 +446,18 @@ class LinkControlDedupeTest {
         val h2 = LinkControl.prepareForLink(listOf(list, txt, other), imeOpen = false).single { it.label == "Хуахин" }
         assertEquals(460, h2.y); assertTrue(h2.clickable)
     }
+
+    @Test
+    fun `junk web labels dropped, real items and coordinates kept`() {
+        fun w(r: String, l: String, y: Int, id: String? = null) = UiNode(r, l, 100, y, intArrayOf(0, y - 20, 200, y + 20), true, viewId = id, cls = "android.view.View")
+        val items = listOf(
+            w("a", "H", 100), w("b", "Я", 200),
+            w("c", "960px-Hua_Hin_hotels.jpg?utm_source=ru.wikipedia", 300),
+            w("d", "https://example.org/x", 400), w("e", "logo.SVG", 500),
+            w("f", "Бангкока", 600), w("g", "+", 700, id = "com.calc:id/plus"),
+        )
+        val out = LinkControl.prepareForLink(items, imeOpen = false)
+        assertEquals(listOf("Бангкока", "+"), out.map { it.label })
+        assertEquals(600, out[0].y)
+    }
 }
