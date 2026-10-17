@@ -212,6 +212,13 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
                 style = MaterialTheme.typography.bodyLarge)
             val busy = current == CoreStep.SESSION && (state.phase == SessionPhase.STARTING || (state.isRunning && state.captureGranted))
             val verb = if (captureLost) R.string.capture_lost_verb else coreVerb(current, state)
+            // Before opening Settings: illustrated, OEM-adapted path (coach overlays need Accessibility, so they can't help yet).
+            if (current == CoreStep.A11Y || current == CoreStep.RESTRICTED) {
+                val g = remember { DeviceSetupGuide(ctx, projectionActive = { state.captureGranted }) }
+                val oem = remember { guideOem(g) }
+                IllustratedGuide(if (current == CoreStep.RESTRICTED) restrictedSteps() else a11ySteps(oem))
+            }
+            val btn = if (current == CoreStep.A11Y || current == CoreStep.RESTRICTED) R.string.g_open_settings else verb
             if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(24.dp)); Spacer(Modifier.width(12.dp)); Text(stringResource(R.string.wiz_starting))
             } else Button(
@@ -241,7 +248,7 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
                 },
                 modifier = Modifier.fillMaxWidth().height(BTN_H),
                 shape = BTN_SHAPE,
-            ) { Text(stringResource(verb), maxLines = 1) }
+            ) { Text(stringResource(btn), maxLines = 1) }
         }
     }
 }

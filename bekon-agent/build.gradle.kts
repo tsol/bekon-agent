@@ -14,8 +14,8 @@ android {
         applicationId = "pro.potoki.bekon.agent"
         minSdk = 24
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.0.7"
+        versionCode = 9
+        versionName = "1.0.8"
     }
 
     // full: sideload/dev build, ships the optional Bekon Keys IME.
