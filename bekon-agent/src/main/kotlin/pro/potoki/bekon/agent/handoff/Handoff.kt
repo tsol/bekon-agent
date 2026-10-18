@@ -15,7 +15,11 @@ object Handoff {
 
     fun root(url: String): String = url.trim().trimEnd('/').removeSuffix("/mcp")
 
-    /** Very short, token-efficient prompt encoded in the QR and copied by "Copy for agent". */
-    fun text(url: String): String =
-        "Bekon: owner shares Android phone via MCP. Read ${root(url)}/ first. MCP endpoint: ${root(url)}/mcp"
+    /** Very short prompt encoded in the QR and copied by "Copy for agent". Leads with link mode for chatbots. */
+    fun text(url: String): String {
+        val r = root(url)
+        val link = "$r/link/start?client=chatgpt"
+        return "Bekon phone. If you can only open web pages (ChatGPT etc.), do NOT stop — open $link " +
+            "(owner taps Allow, then use the action links). MCP (if you can POST): $r/mcp — guide: $r/"
+    }
 }

@@ -6,6 +6,8 @@ import io.ktor.server.request.receiveText
 import io.ktor.server.request.httpMethod
 import io.ktor.server.response.respondText
 import kotlinx.coroutines.launch
+import io.ktor.http.withCharset
+import kotlin.text.Charsets
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArrayBuilder
@@ -207,10 +209,49 @@ class McpHandler(
     @Serializable
     data class JsonRpcResponse(val jsonrpc: String = "2.0", val id: Int = 0, val result: JsonElement? = null, val error: JsonElement? = null)
 
+    /**
+     * GET /mcp with no body: real MCP/SSE clients keep a short plain hint; browsers and web-only
+     * agents (ChatGPT etc.) get an HTML page whose first line is the absolute link-start URL.
+     */
+    private suspend fun respondMcpGet(call: ApplicationCall) {
+        val accept = (call.request.headers["Accept"] ?: "").lowercase()
+        val ua = (call.request.headers["User-Agent"] ?: "")
+        val mcpClient = "text/event-stream" in accept ||
+            ("application/json" in accept && "text/html" !in accept)
+        val base = pro.potoki.bekon.agent.handoff.Handoff.currentUrl
+        try { android.util.Log.i("BekonHttp", "GET /mcp ua=${ua.take(120)} accept=${accept.take(80)} mcpClient=$mcpClient") } catch (_: Throwable) {}
+        if (mcpClient) {
+            call.respondText(
+                pro.potoki.bekon.agent.handoff.AgentGuide.mcpGetHint(base),
+                ContentType.Text.Plain.withCharset(Charsets.UTF_8),
+            )
+            return
+        }
+        // Prefer HTML when the client looks like a browser / generic fetcher; plain text otherwise.
+        val wantHtml = "text/html" in accept || accept.isBlank() || accept == "*/*" ||
+            ua.contains("Mozilla", ignoreCase = true) ||
+            ua.contains("ChatGPT", ignoreCase = true) ||
+            ua.contains("OAI-", ignoreCase = true) ||
+            ua.contains("Claude", ignoreCase = true) ||
+            ua.contains("GPT", ignoreCase = true)
+        call.response.headers.append("X-Robots-Tag", "all")
+        if (wantHtml) {
+            call.respondText(
+                pro.potoki.bekon.agent.handoff.AgentGuide.mcpGetHtml(base),
+                ContentType.Text.Html.withCharset(Charsets.UTF_8),
+            )
+        } else {
+            call.respondText(
+                pro.potoki.bekon.agent.handoff.AgentGuide.mcpGetText(base),
+                ContentType.Text.Plain.withCharset(Charsets.UTF_8),
+            )
+        }
+    }
+
     suspend fun handle(call: ApplicationCall) {
         val body = try { call.receiveText() } catch (e: Exception) { "" }
         if (body.isBlank() && call.request.httpMethod == io.ktor.http.HttpMethod.Get) {
-            call.respondText(pro.potoki.bekon.agent.handoff.AgentGuide.MCP_GET_HINT, io.ktor.http.ContentType.Text.Plain)
+            respondMcpGet(call)
             return
         }
         if (body.isBlank()) { respondJson(call, JsonRpcResponse(id = 0, error = errElement("empty request"))); return }

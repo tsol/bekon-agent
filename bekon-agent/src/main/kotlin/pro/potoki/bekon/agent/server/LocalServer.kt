@@ -76,6 +76,15 @@ class LocalServer(
                     return@intercept
                 }
                 val path = call.request.path()
+                if (call.request.httpMethod == io.ktor.http.HttpMethod.Get || call.request.httpMethod == io.ktor.http.HttpMethod.Head) {
+                    val ua = call.request.headers["User-Agent"] ?: ""
+                    try {
+                        android.util.Log.i(
+                            "BekonHttp",
+                            "${call.request.httpMethod.value} $path ua=${ua.take(140)} accept=${(call.request.headers["Accept"] ?: "").take(60)}",
+                        )
+                    } catch (_: Throwable) { /* JVM unit tests */ }
+                }
                 if (stopping && path == "/mcp") {
                     call.respondText(
                         "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32001,\"message\":\"session_stopping: the owner stopped the Bekon session on the phone\"}}",
@@ -187,11 +196,17 @@ class LocalServer(
             }
             for (p in GUIDE_PATHS) get(p) {
                 val base = pro.potoki.bekon.agent.handoff.Handoff.currentUrl
+                // Prefer "all" so user-triggered agents are not discouraged; CF quick tunnels may still add x-robots-tag: none.
+                call.response.headers.append("X-Robots-Tag", "all")
                 call.respondText(pro.potoki.bekon.agent.handoff.AgentGuide.markdown(base), ContentType.Text.Plain.withCharset(Charsets.UTF_8))
             }
-            // Our own robots.txt. On trycloudflare the edge prepends its managed AI-crawler block; ours is appended
-            // after it, so explicit Allow groups for user-triggered agents merge with (and per RFC 9309 win over) it.
-            get("/robots.txt") { call.respondText(pro.potoki.bekon.agent.handoff.AgentGuide.ROBOTS_TXT, ContentType.Text.Plain.withCharset(Charsets.UTF_8)) }
+            // Our robots.txt. trycloudflare prepends a managed block that Disallows ChatGPT-User etc.; we still
+            // append explicit Allow + Content-Signal ai-input=yes so compliant agents (and humans reading the file)
+            // see the owner's intent. HTTP fetches themselves are not blocked by Bekon (always 200 for these paths).
+            get("/robots.txt") {
+                call.response.headers.append("X-Robots-Tag", "all")
+                call.respondText(pro.potoki.bekon.agent.handoff.AgentGuide.ROBOTS_TXT, ContentType.Text.Plain.withCharset(Charsets.UTF_8))
+            }
             for (p in GUIDE_PATHS + listOf("/mcp", "/robots.txt", "/health", "/link/start")) head(p) { call.respond(HttpStatusCode.OK) }
             // Link-control FALLBACK (GET-only chatbots). Token lives in the path; same expiry as MCP.
             get("/link/{rest...}") {
@@ -199,7 +214,8 @@ class LocalServer(
                 val page = linkPage(links, call.request.path(), q)
                     ?: return@get call.respond(HttpStatusCode.NotFound, "not found")
                 call.response.headers.append("Cache-Control", "no-store")
-                call.response.headers.append("X-Robots-Tag", "noindex, nofollow")
+                // /link/start must be fetchable by ChatGPT-User etc.; keep /s/ tokens noindex below.
+                call.response.headers.append("X-Robots-Tag", "all")
                 call.respondText(page.html ?: "", ContentType.Text.Html.withCharset(Charsets.UTF_8), HttpStatusCode.fromValue(page.status))
             }
             get("/s/{rest...}") {

@@ -56,12 +56,37 @@ class LocalServerTest {
         val robots = client.get("http://127.0.0.1:$port/robots.txt")
         assertTrue("robots 200", robots.status.value == 200)
         val rb = robots.bodyAsText()
-        assertTrue("robots allows user agents", rb.contains("User-agent: ChatGPT-User") && rb.contains("Allow: /") && !rb.contains("Disallow"))
-        val root = client.get("http://127.0.0.1:$port/").bodyAsText()
-        assertTrue("connect block first", root.startsWith("# HOW TO CONNECT") && root.contains("Preferred") && root.contains("/link/start") && root.contains("Fallback"))
-        val gm = client.get("http://127.0.0.1:$port/mcp")
-        assertTrue("GET /mcp 200 with hint", gm.status.value == 200 && gm.bodyAsText().contains("custom MCP connector"))
-        for (path in listOf("/", "/mcp", "/robots.txt", "/llms.txt")) {
+        assertTrue("robots allows user agents", rb.contains("User-agent: ChatGPT-User") && rb.contains("Allow: /") && rb.contains("ai-input=yes") && !rb.contains("Disallow: /"))
+        val root = client.get("http://127.0.0.1:$port/") {
+            header("User-Agent", "ChatGPT-User")
+            header("Accept", "text/html,*/*")
+        }.bodyAsText()
+        assertTrue("connect block first", root.startsWith("# HOW TO CONNECT"))
+        assertTrue("chatbot line first", root.contains("do NOT stop") && root.contains("/link/start?client=chatgpt"))
+        assertTrue("no blocked wording up top", !root.lowercase().contains("access denied") && !root.lowercase().contains("forbidden"))
+        // Plain GET /mcp as browser → HTML with absolute/relative link-start URL first
+        val gm = client.get("http://127.0.0.1:$port/mcp") {
+            header("User-Agent", "Mozilla/5.0 ChatGPT-User")
+            header("Accept", "text/html,application/xhtml+xml")
+        }
+        val gmt = gm.bodyAsText()
+        assertTrue("GET /mcp html 200", gm.status.value == 200)
+        assertTrue("GET /mcp points to link-start", gmt.contains("/link/start?client=chatgpt") && gmt.contains("You can't use MCP from here"))
+        assertTrue("GET /mcp is html", gmt.contains("<a href=") || gmt.contains("<!doctype html>"))
+        // Real MCP client Accept keeps plain hint (not a dead end)
+        val mcpPlain = client.get("http://127.0.0.1:$port/mcp") {
+            header("Accept", "application/json, text/event-stream")
+        }.bodyAsText()
+        assertTrue("MCP client GET stays plain", mcpPlain.contains("POST JSON-RPC") && mcpPlain.contains("/link/start?client=chatgpt"))
+        val linkStart = client.get("http://127.0.0.1:$port/link/start") {
+            header("User-Agent", "ChatGPT-User")
+        }
+        // Without a ClientGate the handler returns 503 Session not ready — still reachable for ChatGPT-User (not 403/404).
+        assertTrue(
+            "GET /link/start reachable for ChatGPT-User (was ${linkStart.status.value})",
+            linkStart.status.value in setOf(200, 503),
+        )
+        for (path in listOf("/", "/mcp", "/robots.txt", "/llms.txt", "/link/start")) {
             val h = client.request("http://127.0.0.1:$port$path") { method = io.ktor.http.HttpMethod.Head }
             assertTrue("HEAD $path 200 (was ${h.status.value})", h.status.value == 200)
         }

@@ -73,7 +73,7 @@ class LinkControl(
     fun handle(method: String, path: String, query: Map<String, String>): Page? {
         if (method != "GET" && method != "HEAD") return null
         when {
-            path == "/link/start" -> return start(query["client"] ?: query["name"] ?: "")
+            path == "/link/start" -> return start((query["client"] ?: query["name"] ?: "chatgpt").ifBlank { "chatgpt" })
             path == "/link/wait" -> return wait(query["ticket"] ?: "")
             path.matches(Regex("""^/s/[^/]+/screen/?$""")) -> {
                 val tok = path.split('/')[2]
@@ -93,7 +93,7 @@ class LinkControl(
     }
 
     private fun start(raw: String): Page {
-        val client = raw.trim().take(48).ifEmpty { return html(400, "Need ?client=<your-name> (a short id for yourself).") }
+        val client = raw.trim().take(48).ifEmpty { "chatgpt" }
         if (!client.matches(Regex("""[A-Za-z0-9._@+\-]{1,48}""")))
             return html(400, "client must be 1–48 chars: letters, digits, . _ @ + -")
         val g = gate ?: return html(503, "Session not ready.")
@@ -121,14 +121,15 @@ class LinkControl(
         }.apply { isDaemon = true; name = "bekon-link-ask"; start() }
         val wait = abs("/link/wait?ticket=$ticket")
         return html(200, """
-            <h1>Bekon — link control (fallback)</h1>
+            <h1>Bekon — link control</h1>
+            <p><b>You are in the right place.</b> This is how chatbots that can only open web pages control the phone (no MCP/POST).</p>
             <p>Ask the phone owner to tap <b>Allow</b> for client <code>${esc(client)}</code>.</p>
             <p>Then open (or refresh):</p>
             <p><a href="$wait">$wait</a></p>
-            <p>MCP is preferred when you can POST. This link mode is only a fallback.</p>
             <p>After approval you get <code>/s/&lt;token&gt;/screen</code>. Keep the owner informed with
-            <code>/s/&lt;token&gt;/status?text=…</code> (status pill) and finish with
-            <code>/s/&lt;token&gt;/done?text=…</code> (marks the task finished; pill shows the final text, then hides as usual).</p>
+            <code>/s/&lt;token&gt;/status?text=…</code> and finish with
+            <code>/s/&lt;token&gt;/done?text=…</code>.</p>
+            <p>If you can POST JSON-RPC, MCP at <code>/mcp</code> is also available — but you do not need it here.</p>
         """.trimIndent())
     }
 

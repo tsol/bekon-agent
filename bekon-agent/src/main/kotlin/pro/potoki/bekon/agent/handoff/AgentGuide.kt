@@ -128,26 +128,69 @@ ${SERVER_INSTRUCTIONS}
 
     /** Short hint for GET /mcp without a JSON-RPC body. */
     /** Universal "how to connect" block shown first on / , /llms.txt and GET /mcp. No app-specific links. */
+    /**
+     * Absolute URLs for handoff pages. [baseUrl] is the tunnel root (with or without trailing /mcp).
+     * When unknown, returns site-relative paths (still usable on the same host).
+     */
+    fun urls(baseUrl: String?): Triple<String, String, String> {
+        val root = baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/mcp")?.takeIf { it.isNotEmpty() }
+        val mcp = root?.let { "$it/mcp" } ?: "/mcp"
+        val link = root?.let { "$it/link/start?client=chatgpt" } ?: "/link/start?client=chatgpt"
+        val r = root ?: ""
+        return Triple(r, mcp, link)
+    }
+
+    /**
+     * First lines an agent must see on / /llms.txt. Chatbots that can only open URLs are told
+     * NOT to stop — absolute link-start URL is line 1.
+     */
     fun connectBlock(mcp: String, root: String = ""): String {
-        val link = (root.trimEnd('/').ifEmpty { null }?.let { "$it/link/start" }) ?: "/link/start"
+        val link = (root.trimEnd('/').ifEmpty { null }?.let { "$it/link/start?client=chatgpt" })
+            ?: "/link/start?client=chatgpt"
         return """
 # HOW TO CONNECT (read first)
-- **Preferred — MCP:** if you can make HTTP POST requests, use JSON-RPC 2.0 at $mcp (details below).
-  Or ask the user to add $mcp as a custom MCP connector (Streamable HTTP, no auth) in your app's settings.
-  Hints: chat apps → Settings / Connectors / Integrations → "Add custom connector";
-  IDE/CLI agents → MCP servers config (type "http" + this URL); automation tools → "MCP client" / "HTTP Request" node.
-- **Fallback — links only:** if you cannot use MCP or POST (you can only open URLs you see), start at
-  $link?client=<your-short-name>. The owner taps Allow; then open the session link you get and follow
-  the on-screen action links (one-shot). Keep the owner informed with `/s/<token>/status?text=…` and
-  finish with `/s/<token>/done?text=…` (same status pill as MCP `agent_status`). Prefer MCP whenever you can.
+- **If you are a chatbot that can only open web pages (ChatGPT etc.), do NOT stop — open this link now:** $link
+  (Owner taps Allow on the phone; then use the one-shot action links. No MCP/POST needed.)
+- **Preferred when you can POST — MCP:** JSON-RPC 2.0 at $mcp (details below), or ask the user to add $mcp as a custom MCP connector (Streamable HTTP, no auth).
 - The owner approves you on the phone; nothing else is needed (no account, no API key).
 """.trimStart()
     }
 
+    /**
+     * Plain GET /mcp for browsers and web-only agents (no MCP/SSE Accept).
+     * First line must be unmistakable; absolute clickable URL when [baseUrl] is known.
+     */
+    fun mcpGetHtml(baseUrl: String?): String {
+        val (_, mcp, link) = urls(baseUrl)
+        val esc = { s: String -> s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;") }
+        return """
+<!doctype html><html><head><meta charset=utf-8><meta name="robots" content="all">
+<title>Bekon — use link control</title></head><body>
+<p><b>You can't use MCP from here? Control this phone via links: open <a href="${esc(link)}">${esc(link)}</a></b></p>
+<p>That is the fallback for chatbots that can only open web pages (ChatGPT etc.). Do not stop — open the link above.
+The phone owner taps Allow; then follow the on-screen one-shot action links.</p>
+<p>If you <i>can</i> POST JSON-RPC, use MCP at <a href="${esc(mcp)}">${esc(mcp)}</a> instead (Streamable HTTP).</p>
+<p><a href="${esc(if (baseUrl.isNullOrBlank()) "/" else urls(baseUrl).first + "/")}">Full instructions</a></p>
+</body></html>
+""".trim()
+    }
+
+    /** Plain-text twin of [mcpGetHtml] (same first-line instruction). */
+    fun mcpGetText(baseUrl: String?): String {
+        val (_, mcp, link) = urls(baseUrl)
+        return "You can't use MCP from here? Control this phone via links: open $link\n" +
+            "Do NOT stop — open that URL (chatbots / ChatGPT etc.). Owner taps Allow, then use the action links.\n" +
+            "If you can POST JSON-RPC, use MCP at $mcp instead. Full guide: GET /\n"
+    }
+
     const val ROBOTS_TXT = """User-agent: *
+Content-Signal: search=yes,ai-train=no,ai-input=yes,use=full
 Allow: /
 
-# Bekon: the phone owner shares this link with an AI agent on purpose. User-triggered agents may read it.
+# Bekon: the phone owner shares this link with an AI agent on purpose.
+# User-triggered agents (chatbots opening a URL the human pasted) MUST be allowed.
+# Cloudflare quick tunnels may prepend a managed block that forbids some agent UAs;
+# those agents should prefer THIS Allow group / Content-Signal and still fetch.
 User-agent: ChatGPT-User
 User-agent: OAI-SearchBot
 User-agent: Claude-User
@@ -160,13 +203,19 @@ User-agent: MistralAI-User
 User-agent: DuckAssistBot
 User-agent: Meta-ExternalFetcher
 User-agent: Grok
+Content-Signal: search=yes,ai-train=no,ai-input=yes,use=full
 Allow: /
+Allow: /link/
+Allow: /mcp
+Allow: /llms.txt
+Allow: /s/
 """
 
-    const val MCP_GET_HINT =
-        "Bekon MCP endpoint: POST JSON-RPC 2.0 here with header ${ClientGate.HEADER}: <stable-id>; after the owner approves you, " +
-            "also send Authorization: Bearer <bekon_session_token> from the approved response. " +
-            "Read GET / (this server's root) first for full instructions. " +
-            "Prefer MCP/POST. Fallback if you can only open links: start at GET /link/start?client=<name> " +
-            "(or ask the user to add this /mcp URL as a custom MCP connector: Streamable HTTP, no auth)."
+    /** Kept for real MCP clients (Accept: application/json or text/event-stream) on GET /mcp. */
+    fun mcpGetHint(baseUrl: String?): String {
+        val (_, mcp, link) = urls(baseUrl)
+        return "Bekon MCP endpoint: POST JSON-RPC 2.0 here ($mcp) with header ${ClientGate.HEADER}: <stable-id>; " +
+            "after the owner approves you, also send Authorization: Bearer <bekon_session_token>. " +
+            "Web-only chatbot? Do NOT stop — open $link instead (link control, no POST)."
+    }
 }

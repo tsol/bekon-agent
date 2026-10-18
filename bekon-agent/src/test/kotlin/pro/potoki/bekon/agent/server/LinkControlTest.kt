@@ -214,4 +214,18 @@ class LinkControlTest {
         assertFalse(LinkControl.isBrowserShellTitle("Chrome: Результаты поиска «Хуахин» — Википедия"))
     }
 
+
+    @Test
+    fun `link start defaults client to chatgpt when omitted`() {
+        val g = gate(true)
+        val links = LinkControl(
+            executor = FakeEx(), gate = g, readOnly = { false },
+            root = { "https://example.test" }, settleMs = 0, waitMs = 3_000,
+        )
+        val start = links.handle("GET", "/link/start", emptyMap())!!
+        assertEquals(200, start.status)
+        assertTrue(start.html!!.contains("chatgpt"))
+        assertTrue(start.html!!.contains("You are in the right place") || start.html!!.contains("link control"))
+    }
+
 }
