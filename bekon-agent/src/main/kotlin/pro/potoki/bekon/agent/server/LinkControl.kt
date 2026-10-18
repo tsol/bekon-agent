@@ -20,6 +20,8 @@ import java.util.concurrent.ConcurrentHashMap
  * Token is the same per-session ClientGate token (dies on Stop / replacement, never persisted); only in this
  * mode it travels in the URL path. Every action link carries a one-shot nonce bound to a snapshot.
  * Coach (highlight / arrow / hint / clear) is allowed in read-only: drawing only, same as MCP coach tools.
+ * Status (same pill as MCP agent_status): GET /s/<token>/status?text=… and GET /s/<token>/done?text=…
+ * (done marks the task finished; the pill shows the final text then hides on the usual TTL/clear/session path).
  */
 class LinkControl(
     private val executor: ActionExecutor,
@@ -80,6 +82,8 @@ class LinkControl(
             path.matches(Regex("""^/s/[^/]+/apps/?$""")) -> return appsPage(path.split('/')[2])
             path.matches(Regex("""^/s/[^/]+/open/?$""")) -> return openUrl(path.split('/')[2], query["url"] ?: "")
             path.matches(Regex("""^/s/[^/]+/shot\.jpe?g$""")) -> return shot(path.split('/')[2])
+            path.matches(Regex("""^/s/[^/]+/status/?$""")) -> return setStatus(path.split('/')[2], query["text"], done = false)
+            path.matches(Regex("""^/s/[^/]+/done/?$""")) -> return setStatus(path.split('/')[2], query["text"], done = true)
             path.matches(Regex("""^/s/[^/]+/do/[^/]+/?$""")) -> {
                 val parts = path.trimEnd('/').split('/')
                 return doAction(parts[2], parts[4], query)
@@ -122,6 +126,9 @@ class LinkControl(
             <p>Then open (or refresh):</p>
             <p><a href="$wait">$wait</a></p>
             <p>MCP is preferred when you can POST. This link mode is only a fallback.</p>
+            <p>After approval you get <code>/s/&lt;token&gt;/screen</code>. Keep the owner informed with
+            <code>/s/&lt;token&gt;/status?text=…</code> (status pill) and finish with
+            <code>/s/&lt;token&gt;/done?text=…</code> (marks the task finished; pill shows the final text, then hides as usual).</p>
         """.trimIndent())
     }
 
@@ -137,7 +144,9 @@ class LinkControl(
                     <h1>Approved</h1>
                     <p>Open this private session link (do not share it — it is your token):</p>
                     <p><a href="$screen">$screen</a></p>
-                    <p>Refresh that page after each step. Stop on the phone ends the token.</p>
+                    <p>Refresh that page after each step. Set the status pill with
+                    <code>/s/…/status?text=…</code>; finish with <code>/s/…/done?text=…</code>.
+                    Stop on the phone ends the token.</p>
                 """.trimIndent())
             }
             t.err?.let { e ->
@@ -208,6 +217,10 @@ class LinkControl(
                     sb.append("</p>\n")
                     sb.append("<p>Open a website: <code>${esc(base)}/open?url=https://…</code> (http/https only). ")
                     sb.append("Type into a field: its <i>type?text=</i> link; append the extra parameter <code>enter=1</code> (example: ...?text=hello and enter=1, joined with an ampersand) to submit.</p>\n")
+                    sb.append("<p>Status pill (same as MCP <code>agent_status</code>): ")
+                    sb.append("<code>${esc(base)}/status?text=Working…</code>")
+                    sb.append(" · finish: <code>${esc(base)}/done?text=Done — you can stop</code>")
+                    sb.append(" (shows the final status, then the banner hides as usual).</p>\n")
                 }
                 sb.append("<h2>Elements</h2>\n<ul>\n")
                 val allVisible = items.filter { it.window != "ime" }
@@ -429,6 +442,51 @@ class LinkControl(
 
 
     private val openTimes = ArrayDeque<Long>()
+
+    /**
+     * Update the owner's status pill (same [pro.potoki.bekon.agent.status.AgentStatus] path as MCP agent_status).
+     * [done]=false → state working; [done]=true → state done (final text, then hides on the usual clear/TTL/session path).
+     * Not nonce-bound: agents build the URL with their own text (like /open). Auth is the session token in the path.
+     */
+    private fun setStatus(token: String, raw: String?, done: Boolean): Page {
+        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start?client=…")
+        if (gate?.isPaused() == true) return html(403, esc(ClientGate.PAUSED))
+        val text = (raw ?: "").trim()
+        if (text.isEmpty()) {
+            val kind = if (done) "done" else "status"
+            return screen(token, note = "$kind needs ?text= (short, under ~60 chars)")
+        }
+        return try {
+            val state = if (done) "done" else "working"
+            // done: short default TTL so the green "finished" pill shows, then hides as usual without a stuck banner.
+            val ttl = if (done) 12_000L else 0L
+            val req = pro.potoki.bekon.agent.status.AgentStatus.parse(text, state, ttl, false)
+            val st = pro.potoki.bekon.agent.status.AgentStatus.apply(req)
+            // Soft: GestureOverlay class-init needs a real Looper (not available in JVM unit tests).
+            val overlay = try {
+                pro.potoki.bekon.agent.device.touch.GestureOverlay.canShowStatus()
+            } catch (_: Throwable) { false }
+            val ctx = try { pro.potoki.bekon.agent.BekonApp.appContext } catch (_: Throwable) { null }
+            if (ctx != null) {
+                try {
+                    if (st == null) pro.potoki.bekon.agent.status.AgentAlert.clear(ctx)
+                    else if (!overlay) pro.potoki.bekon.agent.status.AgentAlert.status(
+                        ctx, st, pro.potoki.bekon.agent.access.AgentConnections.connected.value.lastOrNull())
+                } catch (_: Throwable) { /* unit tests / early boot */ }
+            }
+            val shown = when {
+                st == null -> "cleared"
+                overlay -> "overlay pill"
+                else -> "notification-only"
+            }
+            val label = if (done) "done" else "status"
+            screen(token, note = "$label set ($shown): ${st?.text ?: text}")
+        } catch (e: IllegalArgumentException) {
+            screen(token, note = e.message ?: "bad status")
+        } catch (e: Exception) {
+            screen(token, note = e.message ?: "status error")
+        }
+    }
 
     /** Agent-built URL (cannot be one-shot): http/https only, read-only/pause respected, max 1 per 2 s and 20 per 10 min. */
     private fun openUrl(token: String, raw: String): Page {

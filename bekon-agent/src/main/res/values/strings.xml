@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Bekon Agent</string>
-    <string name="accessibility_service_description">Bekon remote assistance: lets the agent you connected read what is on screen and perform taps, swipes and typing for you. Data goes only to the agent you approve on this phone. Not an accessibility tool for disabilities.</string>
+    <string name="accessibility_service_description">Bekon remote assistance: lets the agent you connected read all on-screen text (including card numbers, codes and personal data) and perform taps, swipes and typing for you — even when screen capture is off. Data goes only to the agent you approve on this phone. Not an accessibility tool for disabilities.</string>
     <string name="ime_name">Bekon Keys</string>
 </resources>

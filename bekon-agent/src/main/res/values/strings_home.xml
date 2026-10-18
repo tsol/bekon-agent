@@ -33,7 +33,7 @@
     <string name="wiz_copy">Copy message</string>
     <string name="wiz_share">Share…</string>
     <string name="wiz_show_qr">QR code</string>
-    <string name="wiz_screen_off">Screen sharing is off — the agent cannot see the screen.</string>
+    <string name="wiz_screen_off">Screen sharing is off — the agent cannot see the screen image, but Accessibility still exposes all on-screen text (card numbers, codes, personal data).</string>
     <string name="wiz_screen_share">Share screen</string>
     <string name="wiz_checklist_title">Finish setup (%1$d/%2$d)</string>
     <string name="wiz_checklist_body">Your agent can guide you through these. Tap Open, then come back.</string>
@@ -42,7 +42,7 @@
     <string name="wiz_mark_done">Done</string>
     <string name="wiz_show">Show</string>
     <string name="wiz_hide">Hide</string>
-    <string name="wiz_explain_accessibility">Lets the agent tap, scroll and point at things for you.</string>
+    <string name="wiz_explain_accessibility">Lets the agent read on-screen text, tap, scroll and point at things for you.</string>
     <string name="wiz_explain_restricted_settings">Android blocks Accessibility for apps installed outside the store until you allow it.</string>
     <string name="wiz_explain_notifications">Shows the session status and the agent\'s requests.</string>
     <string name="wiz_explain_battery">Keeps the session alive while the screen is off.</string>
@@ -88,7 +88,7 @@
     <string name="verb_enable">Turn on</string>
     <string name="verb_open">Open</string>
     <string name="verb_i_did">I did it</string>
-    <string name="capture_lost_body">Screen sharing is off — turn it back on</string>
+    <string name="capture_lost_body">Screen sharing is off — turn it back on. The agent still reads all on-screen text via Accessibility.</string>
     <string name="capture_lost_verb">Turn on again</string>
     <string name="dot_session_on">Screen sharing — on</string>
     <string name="dot_session_off">Screen sharing — off</string>

@@ -27,7 +27,8 @@ object Capabilities {
         )
     }
 
-    /** "видит экран · не может нажимать · шаг 2 из 4" (or пауза). */
+    /** "видит экран · не может нажимать · шаг 2 из 4" (or пауза).
+     *  When capture is off, [cap_blind] admits accessibility still reads on-screen text. */
     fun line(ctx: Context, c: Caps = current(), step: Int? = null, total: Int? = null): String {
         if (c.paused) return ctx.getString(R.string.cap_paused)
         val eye = ctx.getString(if (c.seeing) R.string.cap_sees else R.string.cap_blind)

@@ -33,7 +33,7 @@
     <string name="wiz_copy">Копировать сообщение</string>
     <string name="wiz_share">Поделиться…</string>
     <string name="wiz_show_qr">QR-код</string>
-    <string name="wiz_screen_off">Показ экрана выключен — агент не видит экран.</string>
+    <string name="wiz_screen_off">Показ экрана выключен — агент не видит картинку экрана, но через спец. возможности читает весь текст на экране (номера карт, коды, личные данные).</string>
     <string name="wiz_screen_share">Показать экран</string>
     <string name="wiz_checklist_title">Завершите настройку (%1$d/%2$d)</string>
     <string name="wiz_checklist_body">Агент подскажет, как это сделать. Нажмите «Открыть» и вернитесь сюда.</string>
@@ -42,7 +42,7 @@
     <string name="wiz_mark_done">Готово</string>
     <string name="wiz_show">Показать</string>
     <string name="wiz_hide">Скрыть</string>
-    <string name="wiz_explain_accessibility">Позволяет агенту нажимать, листать и показывать подсказки.</string>
+    <string name="wiz_explain_accessibility">Позволяет агенту читать текст на экране, нажимать, листать и показывать подсказки.</string>
     <string name="wiz_explain_restricted_settings">Android блокирует спец. возможности для приложений не из магазина, пока вы это не разрешите.</string>
     <string name="wiz_explain_notifications">Показывает статус сеанса и просьбы агента.</string>
     <string name="wiz_explain_battery">Сеанс не прервётся при выключенном экране.</string>
@@ -84,7 +84,7 @@
     <string name="verb_enable">Включить</string>
     <string name="verb_open">Открыть</string>
     <string name="verb_i_did">Я сделал</string>
-    <string name="capture_lost_body">Показ экрана отключён — включите снова</string>
+    <string name="capture_lost_body">Показ экрана отключён — включите снова. Агент по-прежнему читает весь текст на экране через спец. возможности.</string>
     <string name="capture_lost_verb">Включить снова</string>
     <string name="dot_session_on">Показ экрана — включён</string>
     <string name="dot_session_off">Показ экрана — не включён</string>
@@ -179,7 +179,7 @@
     <string name="g_scr_appinfo_oneui">Информация о приложении</string>
     <string name="g_sub_allowed">Разрешено</string>
     <string name="g_row_screen_time">Время использования экрана</string>
-    <string name="accessibility_service_description">Удалённая помощь Bekon: подключённый вами агент видит, что на экране, и может нажимать, листать и вводить текст за вас. Данные уходят только агенту, которого вы разрешили на этом телефоне. Это не инструмент для людей с ограниченными возможностями.</string>
+    <string name="accessibility_service_description">Удалённая помощь Bekon: подключённый вами агент читает весь текст на экране (включая номера карт, коды и личные данные) и может нажимать, листать и вводить текст за вас — даже если показ экрана выключен. Данные уходят только агенту, которого вы разрешили на этом телефоне. Это не инструмент для людей с ограниченными возможностями.</string>
     <string name="agent_gone">Агент отключился</string>
     <string name="agent_link_lost">Связь с агентом потеряна</string>
     <string name="g_cant_find">Не вижу такого пункта</string>

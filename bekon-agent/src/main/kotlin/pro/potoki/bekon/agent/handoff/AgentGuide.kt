@@ -138,7 +138,8 @@ ${SERVER_INSTRUCTIONS}
   IDE/CLI agents → MCP servers config (type "http" + this URL); automation tools → "MCP client" / "HTTP Request" node.
 - **Fallback — links only:** if you cannot use MCP or POST (you can only open URLs you see), start at
   $link?client=<your-short-name>. The owner taps Allow; then open the session link you get and follow
-  the on-screen action links (one-shot). Prefer MCP whenever you can.
+  the on-screen action links (one-shot). Keep the owner informed with `/s/<token>/status?text=…` and
+  finish with `/s/<token>/done?text=…` (same status pill as MCP `agent_status`). Prefer MCP whenever you can.
 - The owner approves you on the phone; nothing else is needed (no account, no API key).
 """.trimStart()
     }

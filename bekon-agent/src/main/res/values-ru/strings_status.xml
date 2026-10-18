@@ -25,12 +25,13 @@
     <string name="setup_tap_to_open">Нажмите, чтобы открыть: %1$s</string>
     <string name="setup_tap_body">Агент просит открыть этот экран настроек. Android не дал открыть его автоматически.</string>
     <string name="cap_sees">видит экран</string>
-    <string name="cap_blind">не видит экран</string>
+    <string name="cap_blind">не видит картинку экрана, но читает весь текст</string>
     <string name="cap_taps">может нажимать</string>
     <string name="cap_no_taps">не может нажимать</string>
     <string name="cap_read_only">только смотрит</string>
     <string name="cap_paused">пауза</string>
     <string name="cap_step">шаг %1$d из %2$d</string>
+    <string name="cap_a11y_text_warn">Внимание: спец. возможности открывают агенту весь текст на экране (номера карт, коды, личные данные), даже если показ экрана выключен.</string>
     <string name="cap_agent">Агент %1$s</string>
     <string name="pill_menu_title">Сказать агенту</string>
     <string name="pill_back_to_app">Вернуться в Bekon</string>

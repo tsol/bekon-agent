@@ -3,6 +3,8 @@ package pro.potoki.bekon.agent.server
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import pro.potoki.bekon.agent.status.AgentStatus
+import org.junit.Assert.assertNull
 import org.junit.Test
 import pro.potoki.bekon.agent.access.ClientGate
 import pro.potoki.bekon.agent.access.TrustedClients
@@ -161,4 +163,43 @@ class LinkControlTest {
         val wait = links.handle("GET", "/link/wait", mapOf("ticket" to ticket))!!
         assertEquals(403, wait.status)
     }
+
+    @Test
+    fun `status and done update AgentStatus pill path`() {
+        AgentStatus.clear()
+        val g = gate(true)
+        val links = LinkControl(
+            executor = FakeEx(), gate = g, readOnly = { false },
+            root = { "https://example.test" }, settleMs = 0, waitMs = 3_000,
+        )
+        val start = links.handle("GET", "/link/start", mapOf("client" to "linker"))!!
+        val ticket = Regex("""ticket=([A-Za-z0-9_-]+)""").find(start.html!!)!!.groupValues[1]
+        val wait = links.handle("GET", "/link/wait", mapOf("ticket" to ticket))!!
+        val token = Regex("""/s/([A-Za-z0-9_-]+)/screen""").find(wait.html!!)!!.groupValues[1]
+
+        val screen = links.handle("GET", "/s/$token/screen", emptyMap())!!
+        assertTrue(screen.html!!.contains("/status?text="))
+        assertTrue(screen.html!!.contains("/done?text="))
+        assertTrue(start.html!!.contains("/status?text=") || start.html!!.contains("status pill"))
+
+        val st = links.handle("GET", "/s/$token/status", mapOf("text" to "Настраиваю Wi-Fi"))!!
+        assertEquals(200, st.status)
+        assertTrue(st.html!!.contains("status set"))
+        assertEquals(AgentStatus.State.WORKING, AgentStatus.current.value!!.state)
+        assertEquals("Настраиваю Wi-Fi", AgentStatus.current.value!!.text)
+
+        val done = links.handle("GET", "/s/$token/done", mapOf("text" to "Готово — можно остановить"))!!
+        assertEquals(200, done.status)
+        assertTrue(done.html!!.contains("done set"))
+        assertEquals(AgentStatus.State.DONE, AgentStatus.current.value!!.state)
+        assertTrue(AgentStatus.current.value!!.text.contains("Готово"))
+        assertTrue(AgentStatus.current.value!!.ttlMs > 0) // done auto-hides
+
+        val missing = links.handle("GET", "/s/$token/status", emptyMap())!!
+        assertTrue(missing.html!!.contains("needs ?text="))
+
+        AgentStatus.clear()
+        assertNull(AgentStatus.current.value)
+    }
+
 }
