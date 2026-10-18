@@ -506,13 +506,37 @@ class LinkControl(
         }
         return try {
             AgentConnections.busy {
+                val before = pageSig()
                 (apps ?: throw CapabilityException("open url not available")).openUrl(url)
-                settleQuiet(debounceMs = 700, maxMs = 3_000)
+                // Cold Chrome often goes quiet (a11y) while the tab title is still bare "Chrome";
+                // wait for a real document title like settleNav does after taps.
+                settleNav(before)
+                waitForDocumentTitle()
                 screenWithin(token, "opened: " + url.take(100))
             }
         } catch (e: CapabilityException) { screen(token, note = e.message ?: "blocked") }
         catch (e: Exception) { screen(token, note = e.message ?: "error") }
     }
+
+    /**
+     * Browser shell titles ("Chrome", "Chrome: Chrome", empty) mean the document has not painted yet.
+     * Keep waiting a few seconds so /open returns a usable screen (search field, article title).
+     */
+    private fun waitForDocumentTitle(maxMs: Long = 5_000L) {
+        if (settleMs <= 0) return
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < maxMs) {
+            val title = try { executor.foreground()["title"] ?: "" } catch (_: Exception) { "" }
+            if (!isBrowserShellTitle(title)) {
+                settleQuiet(debounceMs = 350, maxMs = 800)
+                return
+            }
+            Thread.sleep(250)
+        }
+    }
+
+    private fun isBrowserShellTitle(title: String): Boolean = Companion.isBrowserShellTitle(title)
+
 
     /** After launching [pkg]: wait until it is in front, then for a quiet UI (popups/dialogs), max ~3.5 s total. */
     private fun waitForPackage(pkg: String) {
@@ -692,6 +716,21 @@ class LinkControl(
         const val PAGE_SIZE = 200
         private const val NAV_SETTLE_MS = 4_000L
         private const val RESPONSE_BUDGET_MS = 5_000L
+        private val SHELL_TITLES = setOf(
+            "chrome", "firefox", "browser", "internet", "samsung internet", "mi browser",
+            "google chrome", "cromite", "brave", "opera", "edge",
+        )
+
+        /** Visible for unit tests: bare browser chrome vs a loaded document title. */
+        internal fun isBrowserShellTitle(title: String): Boolean {
+            val t = title.trim()
+            if (t.isEmpty()) return true
+            // "Chrome: Википедия — …" → document; bare "Chrome" / "Chrome: Chrome" → shell.
+            val core = (if (':' in t) t.substringAfterLast(':') else t).trim().lowercase()
+            if (core.isEmpty()) return true
+            return core in SHELL_TITLES ||
+                core.matches(Regex("""^(chrome|firefox|browser|internet|samsung internet|mi browser)(\s*\d*)?$"""))
+        }
         private val ID_NAME = Regex("""^(button|field|image|toggle|dropdown|control)( \(id: [^)]*\))?$""")
         private val NAV_LABELS = setOf(
             "назад", "back", "домой", "home", "последние", "recents", "recent apps", "overview",

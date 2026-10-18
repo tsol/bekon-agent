@@ -161,8 +161,19 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
     }
 
     private fun onFrame(reader: ImageReader) {
-        val img = try { reader.acquireLatestImage() } catch (e: Exception) { null } ?: return
-        val bmp = try { imageToBitmap(img) } finally { img.close() }
+        // ImageReader can be closed (or the Image invalidated) while the listener runs — never crash the capture thread.
+        val img = try { reader.acquireLatestImage() } catch (_: Exception) { null } ?: return
+        val bmp = try {
+            imageToBitmap(img)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "frame skipped (image closed): ${e.message}")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "frame skipped: ${e.message}")
+            null
+        } finally {
+            try { img.close() } catch (_: Exception) {}
+        } ?: return
         if (System.currentTimeMillis() < skipBlackUntil && bmp.isNearlyBlack(BLACK_CHANNEL)) {
             bmp.recycle(); return
         }
@@ -202,9 +213,11 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
     }
 
     private fun releasePreviewDisplay() {
+        // Drop the listener first so onFrame cannot race with close().
+        try { imageReader?.setOnImageAvailableListener(null, null) } catch (_: Exception) {}
         virtualDisplay?.release()
         virtualDisplay = null
-        imageReader?.close()
+        try { imageReader?.close() } catch (_: Exception) {}
         imageReader = null
         synchronized(frameLock) { lastFrame?.recycle(); lastFrame = null }
     }

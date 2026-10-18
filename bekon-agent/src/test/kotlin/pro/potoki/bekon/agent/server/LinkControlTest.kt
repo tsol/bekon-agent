@@ -202,4 +202,16 @@ class LinkControlTest {
         assertNull(AgentStatus.current.value)
     }
 
+
+    @Test
+    fun `browser shell title detection`() {
+        assertTrue(LinkControl.isBrowserShellTitle(""))
+        assertTrue(LinkControl.isBrowserShellTitle("Chrome"))
+        assertTrue(LinkControl.isBrowserShellTitle("Chrome: Chrome"))
+        assertTrue(LinkControl.isBrowserShellTitle("Mi Browser"))
+        assertFalse(LinkControl.isBrowserShellTitle("Chrome: Википедия — свободная энциклопедия"))
+        assertFalse(LinkControl.isBrowserShellTitle("Хуахин — Википедия"))
+        assertFalse(LinkControl.isBrowserShellTitle("Chrome: Результаты поиска «Хуахин» — Википедия"))
+    }
+
 }
