@@ -161,7 +161,10 @@ ${Handoff.GUIDANCE_TOOLS}, connection_info, device_setup_guide, current_screen_f
 1. `ocr_screen` or `find_text` {text, contains:true} to locate the target on the CURRENT screen.
 2. Show it: `find_text` draw=true, `som_marks` (numbered marks), `coach_draw` (screen pixels), or `guidance_step` (caption + Next).
 3. `wait_for_change`, then look again and show the next hint; `coach_clear` when done.
-- Below the fold: `find_text` acrossHistory=true returns `scrollHint`; draw an arrow asking the human to scroll.
+- Below the fold: `find_text` acrossHistory=true returns `scrollHint`; show `coach_scroll` {direction:"down"} (bouncing arrow + caption), `wait_for_change`, then `find_text` again.
+- Other home-screen page: `coach_scroll` {direction:"right"} for the next page, "left" for the previous one. direction is always where the content to reach is (the arrow points there), never the finger movement.
+- `find_text` draw=true puts a short caption next to the frame ("Your turn: tap …"); pass `caption` to word it yourself (UI language, ≤ 5 words).
+- If a result has `overlayHidden:true`, this screen blocks overlays: describe the target in words; a hint notification was posted.
 
 ## Server instructions (identical to initialize.instructions)
 ${SERVER_INSTRUCTIONS}

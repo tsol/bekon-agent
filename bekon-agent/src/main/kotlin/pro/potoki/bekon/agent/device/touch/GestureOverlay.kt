@@ -155,12 +155,15 @@ object GestureOverlay {
         main.post {
             ensureInstalled()
             view?.showCoach(bbox, label)
+            // The caption is spoken by the single character (no separate banner chip).
+            StatusPill.setCue(pro.potoki.bekon.agent.coach.Cue(pro.potoki.bekon.agent.coach.Cue.Kind.TAP, label,
+                anchor = bbox?.let { floatArrayOf(it.left.toFloat(), it.top.toFloat(), it.right.toFloat(), it.bottom.toFloat()) }))
             StatusPill.relayout()
         }
     }
 
     fun clearCoach() {
-        main.post { view?.clearCoach(); StatusPill.relayout() }
+        main.post { view?.clearCoach(); StatusPill.setCue(null); StatusPill.relayout() }
     }
 
     /** Coach banner target (screen coords) the status pill must not cover. */
@@ -429,8 +432,8 @@ object GestureOverlay {
                 val bx0 = ((l + r) / 2f - tw / 2f).coerceIn(8f, width - tw - 8f)
                 val minY = safeTop() + 52f
                 val by0 = if (t - 56f >= minY) t - 56f else (b + 52f).coerceAtMost(height - safeBottom() - 12f)
-                canvas.drawRoundRect(bx0 - 12f, by0 - 44f, bx0 + tw + 12f, by0 + 6f, 10f, 10f, coachBg)
-                canvas.drawText(lab, bx0, by0, coachLabelPaint)
+                // Caption: drawn by the character (StatusPill), not as a banner here.
+                if (false) { canvas.drawRoundRect(bx0 - 12f, by0 - 44f, bx0 + tw + 12f, by0 + 6f, 10f, 10f, coachBg); canvas.drawText(lab, bx0, by0, coachLabelPaint) }
             }
             // no bbox: no top banner — the bacon frame alone signals coach mode.
         }

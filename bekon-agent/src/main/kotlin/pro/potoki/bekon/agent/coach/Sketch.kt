@@ -23,15 +23,20 @@ data class Shape(
     val x2: Float, val y2: Float,
     val label: String? = null,
     val color: Int = DEFAULT_COLOR,
+    /** Caption chip top-left chosen by [FreeSpot] (screen px); NaN = default placement. */
+    val lx: Float = Float.NaN,
+    val ly: Float = Float.NaN,
+    /** Guidance: this target is wrapped by the character's own body (not painted as a frame). */
+    val body: Boolean = false,
 ) {
-    enum class Kind { BOX, CIRCLE, ARROW, UNDERLINE, TEXT, MARK, GRID }
+    enum class Kind { BOX, CIRCLE, ARROW, UNDERLINE, TEXT, MARK, GRID, SCROLL }
     companion object {
         const val DEFAULT_COLOR = 0xFFFF2D55.toInt() // marker red-pink
     }
 }
 
 object Sketch {
-    val KINDS = listOf("box", "circle", "arrow", "underline", "text", "mark", "grid")
+    val KINDS = listOf("box", "circle", "arrow", "underline", "text", "mark", "grid", "scroll")
 
     private val NAMED = mapOf(
         "red" to 0xFFFF2D55.toInt(), "green" to 0xFF22C55E.toInt(), "blue" to 0xFF3B82F6.toInt(),
@@ -77,6 +82,11 @@ object Sketch {
             ?.takeIf { it.size == 4 }
         fun need(k: String): Float = o.f(k) ?: throw IllegalArgumentException("shapes[$i] ($type) needs $k")
         return when (type) {
+            "scroll" -> {
+                // Bouncing scroll/swipe cue: x,y = centre (default: screen middle is resolved by caller), dir.
+                val dir = (o.s("dir") ?: o.s("direction") ?: "down").lowercase()
+                scrollCue(dir, need("x"), need("y"), label, color)
+            }
             "box", "rect" -> if (b != null) Shape(Shape.Kind.BOX, b[0], b[1], b[2], b[3], label, color) else {
                 val x = need("x"); val y = need("y")
                 Shape(Shape.Kind.BOX, x, y, x + need("w"), y + need("h"), label, color)
@@ -167,8 +177,25 @@ object Sketch {
         )
     }
 
+    /**
+     * Scroll cue as a SCROLL shape: (x1,y1) = arrow tail, (x2,y2) = arrow head, length ~170 px.
+     * dir = where the content to reach is (never the finger movement): down/up/left/right = see what is
+     * below/above/to the left/to the right; the arrow points that way (right = next home-screen page).
+     */
+    fun scrollCue(dir: String, cx: Float, cy: Float, label: String?, color: Int = Shape.DEFAULT_COLOR): Shape {
+        val l = 110f
+        val (dx, dy) = when (dir) {
+            "up" -> 0f to -1f
+            "left" -> -1f to 0f
+            "right" -> 1f to 0f
+            "down" -> 0f to 1f
+            else -> throw IllegalArgumentException("scroll dir must be up|down|left|right")
+        }
+        return Shape(Shape.Kind.SCROLL, cx - dx * l, cy - dy * l, cx + dx * l, cy + dy * l, label, color)
+    }
+
     /** Where to place a shape's label (top-left of the text baseline), screen space. */
-    fun labelAnchor(s: Shape): Pair<Float, Float> = when (s.kind) {
+    fun labelAnchor(s: Shape): Pair<Float, Float> = if (!s.lx.isNaN() && !s.ly.isNaN()) s.lx to s.ly else when (s.kind) {
         Shape.Kind.ARROW -> s.x1 to s.y1
         Shape.Kind.TEXT -> s.x1 to s.y1
         Shape.Kind.MARK -> ((s.x1 + s.x2) / 2) to ((s.y1 + s.y2) / 2)
@@ -190,6 +217,7 @@ object Sketch {
             Shape.Kind.TEXT -> emptyList()
             Shape.Kind.MARK -> emptyList() // filled badge drawn in SketchPainter
             Shape.Kind.GRID -> emptyList()
+            Shape.Kind.SCROLL -> emptyList() // animated cue drawn in SketchPainter
         }
     }
 }

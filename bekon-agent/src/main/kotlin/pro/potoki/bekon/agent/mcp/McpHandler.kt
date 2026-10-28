@@ -44,7 +44,94 @@ class McpHandler(
     private val coach: pro.potoki.bekon.agent.coach.CoachSurface? = executor as? pro.potoki.bekon.agent.coach.CoachSurface,
     private val setup: pro.potoki.bekon.agent.setup.DeviceSetupGuide? = null,
 ) {
+    /** Guidance: post [summary] as a heads-up hint notification (system UI is never hidden). */
+    private fun postHint(summary: String) {
+        val ctx = pro.potoki.bekon.agent.BekonApp.appContext ?: return
+        try {
+            pro.potoki.bekon.agent.status.AgentAlert.hint(ctx, ctx.getString(pro.potoki.bekon.agent.R.string.hint_notif_title), summary)
+            hintPosted = true
+        } catch (_: Exception) {}
+    }
+
+    @Volatile private var hintPosted = false
+
+    private fun clearHiddenHint() {
+        if (!hintPosted) return
+        hintPosted = false
+        val ctx = pro.potoki.bekon.agent.BekonApp.appContext ?: return
+        try { pro.potoki.bekon.agent.status.AgentAlert.clearHint(ctx) } catch (_: Exception) {}
+    }
+
+    /** After drawing in guidance mode: if Android hides the overlay here, fall back to a notification. */
+    private fun hiddenFallback(summary: String?): Boolean {
+        if (!GUIDANCE) return false
+        val hidden = pro.potoki.bekon.agent.coach.CoachOverlay.screenHidesOverlay
+        if (hidden && summary != null) postHint(summary)
+        return hidden
+    }
+
+    /** Scroll cue at the screen centre line (or x/y), with a default caption in the UI language. */
+    /** Guidance SoM: a label wrapped onto two OCR lines ("SIM cards & mobile" / "networks") is one target. */
+    private fun mergeWrappedLines(items: List<pro.potoki.bekon.agent.core.UiNode>): List<pro.potoki.bekon.agent.core.UiNode> {
+        val out = ArrayList<pro.potoki.bekon.agent.core.UiNode>()
+        for (n in items) {
+            val p = out.lastOrNull(); val a = p?.bounds; val b = n.bounds
+            if (p != null && a != null && b != null) {
+                val h = (a[3] - a[1]).coerceAtLeast(1)
+                if (kotlin.math.abs(a[0] - b[0]) <= h / 2 && b[1] - a[3] in -h / 4..h / 2 && (b[3] - b[1]) <= h * 3 / 2) {
+                    val m = intArrayOf(minOf(a[0], b[0]), a[1], maxOf(a[2], b[2]), b[3])
+                    out[out.size - 1] = p.copy(label = p.label + " " + n.label, bounds = m, x = (m[0] + m[2]) / 2, y = (m[1] + m[3]) / 2)
+                    continue
+                }
+            }
+            out += n
+        }
+        return out
+    }
+
+    private fun scrollCueShape(dir: String, text: String?, x: Int?, y: Int?): pro.potoki.bekon.agent.coach.Shape {
+        val (sw, sh) = (executor as? pro.potoki.bekon.agent.core.DeviceExecutor)?.screenSizeNow() ?: (1080 to 2340)
+        val ctx = pro.potoki.bekon.agent.BekonApp.appContext
+        val res = when (dir) {
+            "up" -> pro.potoki.bekon.agent.R.string.cue_scroll_up
+            "left" -> pro.potoki.bekon.agent.R.string.cue_scroll_left
+            "right" -> pro.potoki.bekon.agent.R.string.cue_scroll_right
+            "down" -> pro.potoki.bekon.agent.R.string.cue_scroll_down
+            else -> throw IllegalArgumentException("direction must be up|down|left|right")
+        }
+        val label = (text?.takeIf { it.isNotBlank() } ?: ctx?.getString(res) ?: dir).take(40)
+        var cx = (x ?: (if (dir == "left" || dir == "right") sw / 2 else (sw * 0.42f).toInt())).toFloat()
+        var cy = (y ?: (if (dir == "up") (sh * 0.35f).toInt() else if (dir == "down") (sh * 0.62f).toInt() else (sh * 0.5f).toInt())).toFloat()
+        val g = pro.potoki.bekon.agent.coach.FreeSpot.current
+        if (x == null && y == null && g != null && g.sw == sw) {
+            // Plainest spot near the default position, clear of current marks and the pill.
+            val vert = dir == "up" || dir == "down"
+            val (bw, bh) = if (vert) 200 to 360 else 360 to 200
+            val d = pro.potoki.bekon.agent.BekonApp.appContext?.resources?.displayMetrics?.density ?: 2.75f
+            val obs = pro.potoki.bekon.agent.coach.CoachOverlay.markBounds(d).map { intArrayOf(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt()) } +
+                listOfNotNull(pro.potoki.bekon.agent.ocr.OwnOverlay.pillRect?.let { intArrayOf(it.left, it.top, it.right, it.bottom) })
+            val zone = if (vert) intArrayOf((sw * 0.2f).toInt(), (cy - sh * 0.12f).toInt(), (sw * 0.8f).toInt(), (cy + sh * 0.12f).toInt())
+                else intArrayOf((sw * 0.3f).toInt(), (sh * 0.35f).toInt(), (sw * 0.7f).toInt(), (sh * 0.65f).toInt())
+            pro.potoki.bekon.agent.coach.FreeSpot.find(g, bw, bh, zone, obs, pro.potoki.bekon.agent.coach.FreeSpot.safeArea ?: intArrayOf(0, (sh * 0.04f).toInt(), sw, (sh * 0.94f).toInt()), distWeight = 1.2f)
+                ?.let { cx = (it.rect[0] + it.rect[2]) / 2f; cy = (it.rect[1] + it.rect[3]) / 2f }
+        }
+        return pro.potoki.bekon.agent.coach.Sketch.scrollCue(dir, cx, cy, label)
+    }
+
+    /** Rough words for where a box is ("top left", "middle", ...), for hints without an overlay. */
+    private fun where(b: IntArray, sw: Int, sh: Int): String {
+        if (sw <= 0 || sh <= 0) return ""
+        val cx = (b[0] + b[2]) / 2f / sw; val cy = (b[1] + b[3]) / 2f / sh
+        val v = if (cy < 0.33f) "top" else if (cy < 0.66f) "middle" else "bottom"
+        val h = if (cx < 0.33f) " left" else if (cx > 0.66f) " right" else ""
+        return v + h
+    }
+
     companion object {
+        /** Returned when Android hides Bekon's overlay on the current screen. */
+        const val HIDDEN_TEXT = "overlayHidden: this screen blocks overlays (Android hides Bekon's marks and pill here, e.g. some system Settings pages). " +
+            "A hint notification with your label was posted instead; also describe the target in words (label + position). Marks return on other screens."
+
         /** Default stays well below Cloudflare's ~100s proxy read timeout (HTTP 524). */
         const val WAIT_DEFAULT_MS = 30_000
         const val WAIT_MAX_MS = 90_000
@@ -93,7 +180,7 @@ class McpHandler(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
             "coach_draw", "coach_clear", "open_setup_screen", "coach_script", "coach_script_stop", "scan_list",
             "open_url", "shortcut_add", "shortcut_remove",
-            "find_text", "ocr_screen", "som_marks", "nav_mark", "guidance_step",
+            "find_text", "ocr_screen", "som_marks", "nav_mark", "guidance_step", "coach_scroll",
         )
         const val GUIDANCE = pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE
         /** Tools hidden from tools/list in guidance mode. */
@@ -651,6 +738,7 @@ class McpHandler(
             }
         }
         "coach_draw" -> {
+            if (GUIDANCE) clearHiddenHint()
             val c = coach ?: throw CapabilityException("coach: not available")
             val (resolved, anchors) = resolveAnchors(args["shapes"] as? kotlinx.serialization.json.JsonArray)
             val shapes = pro.potoki.bekon.agent.coach.Sketch.parse(resolved)
@@ -663,7 +751,13 @@ class McpHandler(
                 )
             }
             if (!append) followAnchors(c, shapes, anchors) else anchorJob?.cancel()
-            buildJsonObject { put("ok", true); put("text", "drew ${shapes.size} mark(s) on the phone screen. Now call wait_for_change (pass your last baseline) and read its diff; do not ask the human to say 'done'.") }
+            val labels = shapes.mapNotNull { it.label?.takeIf { l -> l.isNotBlank() } }.joinToString(" · ")
+            val hidden = hiddenFallback(labels.ifBlank { null })
+            buildJsonObject {
+                put("ok", true)
+                if (hidden) { put("overlayHidden", true); put("text", HIDDEN_TEXT) }
+                else put("text", "drew ${shapes.size} mark(s) on the phone screen. Now call wait_for_change (pass your last baseline) and read its diff; do not ask the human to say 'done'.")
+            }
         }
         "coach_script" -> {
             val rules = pro.potoki.bekon.agent.coach.CoachScript.parse(args["rules"] as? kotlinx.serialization.json.JsonArray)
@@ -696,6 +790,7 @@ class McpHandler(
             buildJsonObject { put("ok", true); put("text", "script stopped, marks cleared") }
         }
         "coach_clear" -> {
+            if (GUIDANCE) clearHiddenHint()
             val c = coach ?: throw CapabilityException("coach: not available")
             scripts.run?.takeIf { it.status == "running" }?.let { scripts.stop() }
             anchorJob?.cancel()
@@ -728,27 +823,47 @@ class McpHandler(
             val contains = args.boolOr("contains") ?: true
             val across = args.boolOr("acrossHistory") ?: false
             val c = coach
-            val hits = if (across && GUIDANCE) {
+            val (sw0, sh0) = try { (executor as? pro.potoki.bekon.agent.core.DeviceExecutor)?.screenSizeNow() ?: (0 to 0) } catch (_: Exception) { 0 to 0 }
+            // History hits are in page space; convert with the current scroll offset so marks land on screen.
+            // Fresh pill-free OCR of the current screen first, so history includes what is visible right now.
+            val fresh = if (across && GUIDANCE) try { executor.snapshot() } catch (_: Exception) { null } else null
+            val off = if (across && GUIDANCE) pro.potoki.bekon.agent.ocr.ScreenHistory.currentOffset() else 0
+            // What is on screen right now wins: its OCR bounds are exact, while history positions
+            // are page-space estimates that drift when a fling outruns the scroll tracker.
+            val freshHits = fresh?.items?.filter {
+                pro.potoki.bekon.agent.ocr.TextMatch.matches(it.label, q, contains)
+            }?.map { Triple(it.label, it.bounds ?: intArrayOf(it.x, it.y, it.x, it.y), -1) }.orEmpty()
+            val histHits = if (freshHits.isEmpty() && across && GUIDANCE) {
                 pro.potoki.bekon.agent.ocr.ScreenHistory.findText(q, contains).map {
-                    Triple(it.text, it.pageBounds, it.frameIndex)
-                }
-            } else {
-                val snap = executor.snapshot()
+                    val pb = it.pageBounds
+                    Triple(it.text, intArrayOf(pb[0], pb[1] - off, pb[2], pb[3] - off), it.frameIndex)
+                }.sortedBy { t -> if (sh0 > 0 && t.second[1] >= 0 && t.second[3] <= sh0) 0 else 1 }
+            } else emptyList()
+            val hits = if (freshHits.isNotEmpty()) freshHits else if (histHits.isNotEmpty()) histHits else {
+                val snap = fresh ?: executor.snapshot()
                 snap.items.filter {
-                    if (contains) it.label.contains(q, true) else it.label.equals(q, true)
+                    pro.potoki.bekon.agent.ocr.TextMatch.matches(it.label, q, contains)
                 }.map { Triple(it.label, it.bounds ?: intArrayOf(it.x, it.y, it.x, it.y), -1) }
             }
             val draw = args.boolOr("draw") ?: true
             val kind = (args.strOr("mark") ?: "highlight").lowercase()
-            if (draw && hits.isNotEmpty() && c != null) {
-                val (text, b, _) = hits.first()
+            val onScreen = hits.isNotEmpty() && (sh0 <= 0 || (hits.first().second[1] >= 0 && hits.first().second[3] <= sh0))
+            var hidden = false
+            if (GUIDANCE) clearHiddenHint()
+            if (draw && onScreen && c != null) {
+                val (ocrText, b, _) = hits.first()
+                // OCR may return look-alike glyphs (Cyrillic read by the Latin model): show the human
+                // the label as the agent asked for it, not the raw OCR string.
+                val text = if (ocrText.contains(q, true)) ocrText else q
+                val capDefault: String? = if (GUIDANCE) pro.potoki.bekon.agent.BekonApp.appContext?.getString(pro.potoki.bekon.agent.R.string.cue_tap, text.take(28)) else null
+                val cap: String = (args.strOr("caption")?.takeIf { it.isNotBlank() } ?: capDefault ?: text).take(48)
                 val shapes = when (kind) {
                     "arrow" -> listOf(
                         pro.potoki.bekon.agent.coach.Shape(
                             pro.potoki.bekon.agent.coach.Shape.Kind.ARROW,
                             b[0].toFloat(), (b[1] - 120).toFloat().coerceAtLeast(0f),
                             ((b[0] + b[2]) / 2f), b[1].toFloat(),
-                            text.take(40),
+                            cap,
                         ),
                     )
                     "mark", "som" -> listOf(
@@ -762,7 +877,7 @@ class McpHandler(
                         pro.potoki.bekon.agent.coach.Shape(
                             pro.potoki.bekon.agent.coach.Shape.Kind.BOX,
                             b[0].toFloat(), b[1].toFloat(), b[2].toFloat(), b[3].toFloat(),
-                            text.take(40),
+                            cap,
                         ),
                     )
                 }
@@ -770,11 +885,12 @@ class McpHandler(
                 if (!c.drawOnScreen(shapes, false, ttl) && GUIDANCE) {
                     throw CapabilityException("overlay: display-over-other-apps is off")
                 }
+                hidden = hiddenFallback("“$text” — " + where(b, sw0, sh0))
             }
-            val (sw, sh) = try {
+            val (sw, sh) = if (sh0 > 0) sw0 to sh0 else try {
                 val s = executor.snapshot(); s.screenW to s.screenH
             } catch (_: Exception) { 0 to 0 }
-            val hint = if (across && GUIDANCE) {
+            val hint = if (across && GUIDANCE && freshHits.isEmpty()) {
                 pro.potoki.bekon.agent.ocr.ScreenHistory.scrollHintFor(q, 0, sh)
             } else null
             buildJsonObject {
@@ -789,10 +905,15 @@ class McpHandler(
                     }
                 })
                 hint?.let { put("scrollHint", it) }
+                if (hidden) put("overlayHidden", true)
                 put("text", when {
+                    hidden -> HIDDEN_TEXT
+                    hits.isEmpty() && across && GUIDANCE -> "no match for '$q' on screen or in this session's scroll history. If the list continues below, ask the human to scroll (coach_scroll direction=down), wait_for_change, then find_text again"
                     hits.isEmpty() -> "no match for '$q'"
-                    hint == "below (swipe up / scroll down to reveal)" -> "found further down — ask the user to scroll down, then find_text again"
-                    hint == "above (swipe down / scroll up to reveal)" -> "found above — ask the user to scroll up"
+                    !onScreen && hint == null -> "found but off screen — ask the user to scroll, then find_text again"
+                    hint == "below (swipe up / scroll down to reveal)" -> "found further down — show coach_scroll direction=down, wait_for_change, then find_text again"
+                    hint == "above (swipe down / scroll up to reveal)" -> "found above — show coach_scroll direction=up, wait_for_change, then find_text again"
+                    !draw || !onScreen -> "found ${hits.size} match(es)"
                     else -> "highlighted ${hits.size} match(es); user taps"
                 })
             }
@@ -801,7 +922,15 @@ class McpHandler(
             val snap = executor.snapshot()
             val max = (args.intOr("max") ?: 12).coerceIn(1, 30)
             val grid = args.boolOr("grid") ?: false
-            val items = snap.items.take(max)
+            // Skip the status bar (clock, icons) and OCR junk (")", "|"): marks go on real targets, in reading order.
+            val sbH = (snap.screenH * 0.035f).toInt()
+            val items = if (!GUIDANCE) snap.items.take(max) else snap.items.filter { n ->
+                val b = n.bounds ?: intArrayOf(n.x, n.y, n.x, n.y)
+                b[1] >= sbH && n.label.count { it.isLetter() } >= 2 &&
+                    !Regex("^(on|off|вкл|выкл)\\W*$", RegexOption.IGNORE_CASE).matches(n.label.trim())
+            }.distinctBy { it.label.lowercase() to (it.y / 40) }
+                .sortedWith(compareBy({ it.y / 48 }, { it.x }))
+                .let { mergeWrappedLines(it) }.take(max)
             val shapes = ArrayList<pro.potoki.bekon.agent.coach.Shape>()
             if (grid) {
                 shapes += pro.potoki.bekon.agent.coach.Shape(
@@ -892,6 +1021,21 @@ class McpHandler(
             put("label", st.label ?: "")
             put("screen_changed", st.changed)
         }
+        "coach_scroll" -> {
+            val c = coach ?: throw CapabilityException("coach: not available")
+            if (GUIDANCE) clearHiddenHint()
+            val dir = (args.strOr("direction") ?: "down").lowercase()
+            val shape = scrollCueShape(dir, args.strOr("text"), args.intOr("x"), args.intOr("y"))
+            val append = args.boolOr("append") ?: false
+            val ttl = (args.intOr("ttlMs") ?: 15_000).toLong()
+            if (!c.drawOnScreen(listOf(shape), append, ttl)) throw CapabilityException("overlay: display-over-other-apps is off")
+            val hidden = hiddenFallback(shape.label)
+            buildJsonObject {
+                put("ok", true); put("direction", dir)
+                if (hidden) { put("overlayHidden", true); put("text", HIDDEN_TEXT) }
+                else put("text", "showing a bouncing $dir cue \"${shape.label}\". The human scrolls/swipes; call wait_for_change, then find_text again (acrossHistory=true).")
+            }
+        }
         "guidance_step" -> {
             val text = args.strOr("text") ?: ""
             val step = args.intOr("step")
@@ -906,8 +1050,18 @@ class McpHandler(
                 val req = pro.potoki.bekon.agent.status.AgentStatus.parse(text, st.wire, args.intOr("ttlMs")?.toLong(), false, "top", step, total)
                 pro.potoki.bekon.agent.status.AgentStatus.apply(req)
             }
+            // The pill is an overlay too: on screens that hide overlays, repeat the step as a notification.
+            var pillHidden = false
+            if (GUIDANCE && text.isNotBlank()) {
+                pillHidden = pro.potoki.bekon.agent.coach.CoachOverlay.screenHidesOverlay
+                if (pillHidden) postHint((if (step != null && total != null) "$step/$total · " else "") + text)
+            }
+            args.strOr("scroll")?.takeIf { it.isNotBlank() }?.let { d ->
+                coach?.drawOnScreen(listOf(scrollCueShape(d.lowercase(), null, null, null)), true, (args.intOr("ttlMs") ?: 15_000).toLong())
+            }
             buildJsonObject {
                 put("ok", true)
+                if (pillHidden) put("overlayHidden", true)
                 put("text", "guidance step set — wait for userEvents next_step (pill Next) or wait_for_change")
                 put("hint", "Do not tap for the user. Draw a mark, then wait.")
             }
@@ -1092,7 +1246,7 @@ class McpHandler(
         )
         tool(
             "coach_draw",
-            "Coach the human live: draw hand-drawn circles/boxes/arrows/underlines/labels directly on the phone screen (accessibility overlay; touches pass through). Replaces previous marks unless append=true. ttlMs>0 auto-clears. Needs Gestures (accessibility) on; otherwise use annotate_screenshot.",
+            if (GUIDANCE) "Show the human a hint: draw circles/boxes/arrows/underlines/labels on the phone screen (display-over-other-apps overlay; touches pass through, the human taps). Replaces previous marks unless append=true. ttlMs>0 auto-clears. If the overlay permission is off, use annotate_screenshot." else "Coach the human live: draw hand-drawn circles/boxes/arrows/underlines/labels directly on the phone screen (accessibility overlay; touches pass through). Replaces previous marks unless append=true. ttlMs>0 auto-clears. Needs Gestures (accessibility) on; otherwise use annotate_screenshot.",
             schema {
                 add("shapes", shapesSchema, true)
                 add("append", buildJsonObject { put("type", "boolean") }, false)
@@ -1210,6 +1364,7 @@ class McpHandler(
                 add("acrossHistory", buildJsonObject { put("type", "boolean") }, false)
                 add("draw", buildJsonObject { put("type", "boolean") }, false)
                 str("mark", enum = listOf("highlight", "arrow", "mark"), required = false)
+                str("caption", required = false)
                 int("ttlMs", required = false)
             },
         )
@@ -1250,11 +1405,22 @@ class McpHandler(
         )
         tool(
             "guidance_step",
-            "Set the status pill for a guided step (waiting/working/done) with optional step/total. Then wait for userEvents next_step or wait_for_change. Never tap for the user.",
+            "Set the status pill for a guided step (waiting/working/done) with optional step/total; scroll=up|down|left|right also shows a bouncing scroll cue pointing toward the content to reach (right = next home-screen page). Then wait for userEvents next_step or wait_for_change. Never tap for the user.",
             schema {
                 str("text", required = false)
                 str("state", enum = listOf("waiting", "working", "done", "error"), required = false)
                 int("step", required = false); int("total", required = false); int("ttlMs", required = false)
+                str("scroll", enum = listOf("up", "down", "left", "right"), required = false)
+            },
+        )
+        tool(
+            "coach_scroll",
+            "Show a bouncing hand-drawn scroll arrow with a short caption. direction = where the content the human must reach is (NOT the finger movement): down = see what is below, up = what is above, left = what is to the left, right = what is to the right (right = next home-screen page / next tab, left = previous). The arrow points that way. Optional text (≤ 5 words, UI language), x/y centre, ttlMs (default 15000), append. Then wait_for_change. The human scrolls; Bekon never does.",
+            schema {
+                str("direction", enum = listOf("up", "down", "left", "right"))
+                str("text", required = false)
+                int("x", required = false); int("y", required = false); int("ttlMs", required = false)
+                add("append", buildJsonObject { put("type", "boolean") }, false)
             },
         )
         tool("shortcut_remove", "Delete a saved shortcut by id.", schema { str("id") })

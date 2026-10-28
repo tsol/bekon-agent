@@ -39,6 +39,11 @@ object Capabilities {
     fun line(ctx: Context, c: Caps = current(), step: Int? = null, total: Int? = null): String {
         if (c.paused) return ctx.getString(R.string.cap_paused)
         val eye = ctx.getString(if (c.seeing) R.string.cap_sees else R.string.cap_blind)
+        // Guidance with hints working: the eye alone says it all (no "guidance · you tap").
+        if (c.guidance && c.canHint) {
+            val st0 = if (step != null && total != null) " · " + ctx.getString(R.string.cap_step, step, total) else ""
+            return eye + st0
+        }
         val hand = ctx.getString(when {
             c.guidance && c.canHint -> R.string.cap_guidance
             c.guidance -> R.string.cap_guidance_no_overlay

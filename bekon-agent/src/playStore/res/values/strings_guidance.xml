@@ -22,4 +22,6 @@
     <string name="access_title">New assistant wants to connect</string>
     <string name="access_note_title">Assistant «%1$s» asks to connect</string>
     <string name="access_note_text">Assistant «%1$s» asks to connect (from %2$s) to see the screen and show hints. Tap Allow or Deny.</string>
+    <string name="cap_agent">%1$s</string>
+    <string name="cap_sees">👁</string>
 </resources>

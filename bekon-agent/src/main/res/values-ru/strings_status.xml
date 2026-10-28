@@ -24,6 +24,8 @@
     <string name="alert_status_body">%1$s · %2$s\n%3$s</string>
     <string name="setup_tap_to_open">Нажмите, чтобы открыть: %1$s</string>
     <string name="setup_tap_body">Агент просит открыть этот экран настроек. Android не дал открыть его автоматически.</string>
+    <!-- Character idle status line (text only; the donut hole is the eye). -->
+    <string name="char_sees">видит экран</string>
     <string name="cap_sees">видит экран</string>
     <string name="cap_blind">не видит картинку экрана, но читает весь текст</string>
     <string name="cap_taps">может нажимать</string>
@@ -57,4 +59,10 @@
     <string name="core_step_overlay">Разрешить подсказки на экране</string>
     <string name="dot_overlay_on">Подсказки: оверлей разрешён</string>
     <string name="dot_overlay_off">Подсказки: разрешите показ поверх приложений</string>
+    <string name="hint_notif_title">Подсказка ассистента</string>
+    <string name="cue_tap">Ваш ход: нажмите «%1$s»</string>
+    <string name="cue_scroll_down">Прокрутите вниз</string>
+    <string name="cue_scroll_up">Прокрутите вверх</string>
+    <string name="cue_scroll_left">Прокрутите влево</string>
+    <string name="cue_scroll_right">Прокрутите вправо</string>
 </resources>

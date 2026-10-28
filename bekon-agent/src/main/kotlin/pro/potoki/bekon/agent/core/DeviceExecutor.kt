@@ -130,7 +130,28 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
         guardRead()
         if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) {
             pro.potoki.bekon.agent.coach.CoachOverlay.bindAppContext(context)
-            return pro.potoki.bekon.agent.coach.CoachOverlay.show(null, shapes, append, ttlMs)
+            val before = latestCaptureBitmap()
+            val prev = if (append) pro.potoki.bekon.agent.coach.CoachOverlay.markBounds(context.resources.displayMetrics.density)
+                .map { intArrayOf(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt()) } else emptyList()
+            val placed = try { pro.potoki.bekon.agent.coach.FreeSpot.placeLabels(shapes, extra = prev + listOfNotNull(pro.potoki.bekon.agent.ocr.OwnOverlay.pillRect?.let { intArrayOf(it.left, it.top, it.right, it.bottom) })) } catch (_: Exception) { shapes }
+            val ok = pro.potoki.bekon.agent.coach.CoachOverlay.show(null, placed, append, ttlMs)
+            if (ok) {
+                try {
+                    Thread.sleep(250)
+                    var after = latestCaptureBitmap()
+                    var hidden = overlayMissing(shapes, before, after)
+                    if (hidden == true && pro.potoki.bekon.agent.coach.CoachOverlay.hasMarks()) {
+                        // The projection frame can lag a draw; confirm once before falling back.
+                        Thread.sleep(450); after?.recycle(); after = latestCaptureBitmap()
+                        hidden = overlayMissing(shapes, before, after)
+                    }
+                    if (hidden == null) hidden = try { pro.potoki.bekon.agent.device.touch.StatusPill.hiddenBySystem() } catch (_: Exception) { null }
+                    if (hidden != null) pro.potoki.bekon.agent.coach.CoachOverlay.screenHidesOverlay = hidden
+                    after?.recycle()
+                } catch (_: Exception) {}
+            }
+            before?.recycle()
+            return ok
         }
         return pro.potoki.bekon.agent.coach.CoachOverlay.show(TouchService.active, shapes, append, ttlMs)
     }
@@ -236,13 +257,19 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
     /** Guidance mode: OCR the latest capture into UiNode-like items (ref e1..). */
     private fun snapshotFromOcr(): ScreenSnapshot {
         val sc = screenCapture ?: throw CapabilityException("capture: media permission not granted")
-        val full = sc.latestBitmap() ?: throw CapabilityException("capture: no frame")
+        val hidPill = pro.potoki.bekon.agent.overlay.OverlayHost.guidance &&
+            try { pro.potoki.bekon.agent.device.touch.StatusPill.hideForCapture() } catch (_: Exception) { false }
+        if (hidPill) Thread.sleep(220)
+        val full = try { sc.latestBitmap() } finally {
+            if (hidPill) try { pro.potoki.bekon.agent.device.touch.StatusPill.restoreAfterCapture() } catch (_: Exception) {}
+        } ?: throw CapabilityException("capture: no frame")
         val (sw, sh) = screenSizeNow()
         try {
             val ocr = pro.potoki.bekon.agent.ocr.ScreenOcr.recognize(full, timeoutMs = 8_000)
-            val blocks = pro.potoki.bekon.agent.ocr.ScreenOcr.toScreen(ocr.blocks, ocr.imageW, ocr.imageH, sw, sh)
+            val blocks = pro.potoki.bekon.agent.ocr.ScreenOcr.toScreen(ocr.blocks, ocr.imageW, ocr.imageH, sw, sh, pillInFrame = !hidPill)
             pro.potoki.bekon.agent.nav.NavJournal.observe(blocks, sw, sh)
-            pro.potoki.bekon.agent.ocr.ScreenHistory.offerFrame(full, sw, sh, pro.potoki.bekon.agent.nav.NavJournal.currentFingerprint(), force = false)
+            pro.potoki.bekon.agent.coach.FreeSpot.updateFromFrame(full, sw, sh, blocks.map { it.bounds })
+            pro.potoki.bekon.agent.ocr.ScreenHistory.offerFrame(full, sw, sh, pro.potoki.bekon.agent.nav.NavJournal.currentFingerprint(), force = true, blocks = blocks)
             val items = ArrayList<UiNode>()
             for ((i, b) in blocks.withIndex()) {
                 val bb = b.bounds
@@ -263,6 +290,66 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
         } finally {
             // latestBitmap may be owned by capture — do not recycle here
         }
+    }
+
+    /**
+     * Some screens (system Settings pages with HIDE_NON_SYSTEM_OVERLAY_WINDOWS) make Android hide our
+     * overlay without telling the app. Detect it from the captured frame: near each shape, count pixels
+     * of the shape colour before/after drawing. Null = cannot tell (no capture or nothing countable).
+     */
+    private fun overlayMissing(
+        shapes: List<pro.potoki.bekon.agent.coach.Shape>,
+        before: android.graphics.Bitmap?,
+        after: android.graphics.Bitmap?,
+    ): Boolean? {
+        if (after == null || shapes.isEmpty()) return null
+        var b = 0; var a = 0; var counted = false
+        for (s in shapes) {
+            // Only what the frames window really draws (captions/scroll arrows live in the character).
+            if (s.kind == pro.potoki.bekon.agent.coach.Shape.Kind.GRID || s.kind == pro.potoki.bekon.agent.coach.Shape.Kind.SCROLL ||
+                s.kind == pro.potoki.bekon.agent.coach.Shape.Kind.TEXT) continue
+            val l = (minOf(s.x1, s.x2) - 24).toInt().coerceIn(0, after.width - 1)
+            val r = (maxOf(s.x1, s.x2) + 24).toInt().coerceIn(0, after.width - 1)
+            val t = (minOf(s.y1, s.y2) - 24).toInt().coerceIn(0, after.height - 1)
+            val btm = (maxOf(s.y1, s.y2) + 24).toInt().coerceIn(0, after.height - 1)
+            if (r <= l || btm <= t) continue
+            if (!s.label.isNullOrBlank() && s.kind != pro.potoki.bekon.agent.coach.Shape.Kind.MARK) {
+                // Wrapped by the character body (contrast-picked colour): count changed pixels instead.
+                if (before == null || before.width != after.width || before.height != after.height) continue
+                counted = true; a += diffCount(before, after, l, t, r, btm); continue
+            }
+            counted = true
+            a += colorCount(after, s.color, l, t, r, btm)
+            if (before != null && before.width == after.width && before.height == after.height) b += colorCount(before, s.color, l, t, r, btm)
+        }
+        if (!counted) return null
+        return a - b < 40 && a < 150
+    }
+
+    private fun diffCount(x: android.graphics.Bitmap, y: android.graphics.Bitmap, l: Int, t: Int, r: Int, b: Int): Int {
+        var n = 0; var yy = t
+        while (yy <= b) { var xx = l
+            while (xx <= r) { val p = x.getPixel(xx, yy); val q = y.getPixel(xx, yy)
+                if (kotlin.math.abs(((p shr 16) and 0xFF) - ((q shr 16) and 0xFF)) + kotlin.math.abs(((p shr 8) and 0xFF) - ((q shr 8) and 0xFF)) + kotlin.math.abs((p and 0xFF) - (q and 0xFF)) > 90) n++
+                xx += 2 }
+            yy += 2 }
+        return n
+    }
+
+    private fun colorCount(bm: android.graphics.Bitmap, c: Int, l: Int, t: Int, r: Int, b: Int): Int {
+        val cr = (c shr 16) and 0xFF; val cg = (c shr 8) and 0xFF; val cb = c and 0xFF
+        var n = 0
+        var y = t
+        while (y <= b) {
+            var x = l
+            while (x <= r) {
+                val p = bm.getPixel(x, y)
+                if (kotlin.math.abs(((p shr 16) and 0xFF) - cr) < 40 && kotlin.math.abs(((p shr 8) and 0xFF) - cg) < 40 && kotlin.math.abs((p and 0xFF) - cb) < 40) n++
+                x += 2
+            }
+            y += 2
+        }
+        return n
     }
 
     fun latestCaptureBitmap(): android.graphics.Bitmap? = try { screenCapture?.latestBitmap() } catch (_: Exception) { null }

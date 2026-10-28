@@ -96,6 +96,10 @@ object NavJournal {
         screenH: Int,
         a11yWindow: String? = null,
     ): String {
+        // Status bar (clock, battery, notification icons) changes on its own: never part of the screen identity.
+        val statusBar = (screenH * 0.035f).toInt()
+        @Suppress("NAME_SHADOWING")
+        val blocks = blocks.filter { it.bounds[1] >= statusBar }
         if (blocks.isEmpty() && a11yWindow == null) return "empty"
         val topBand = (screenH * 0.18f).toInt()
         val bottomBand = (screenH * 0.82f).toInt()
@@ -128,10 +132,16 @@ object NavJournal {
         return parts.joinToString("|")
     }
 
-    private fun fuzzySame(a: String, b: String): Boolean {
+    /**
+     * Token-level comparison: our own hint marks (boxes around text) or one OCR misread change a few
+     * tokens, not half of them. A real screen change replaces most of the title/mid/bottom texts.
+     */
+    internal fun fuzzySame(a: String, b: String): Boolean {
         if (a == b) return true
-        val ta = a.split('|').toSet()
-        val tb = b.split('|').toSet()
+        fun toks(s: String) = s.split('|').flatMap { seg -> seg.substringAfter(':').split(',') }
+            .map { it.trim() }.filter { it.length >= 3 }.toSet()
+        val ta = toks(a); val tb = toks(b)
+        if (ta.isEmpty() || tb.isEmpty()) return false
         val inter = ta.intersect(tb).size
         return inter >= 2 && inter * 2 >= minOf(ta.size, tb.size)
     }

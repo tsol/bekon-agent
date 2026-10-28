@@ -24,6 +24,8 @@
     <string name="alert_status_body">%1$s · %2$s\n%3$s</string>
     <string name="setup_tap_to_open">Tap to open: %1$s</string>
     <string name="setup_tap_body">The agent asks you to open this settings screen. Android blocked opening it automatically.</string>
+    <!-- Character idle status line (text only; the donut hole is the eye). -->
+    <string name="char_sees">sees the screen</string>
     <string name="cap_sees">sees the screen</string>
     <string name="cap_blind">can\'t see the screen image, but reads all on-screen text</string>
     <string name="cap_taps">can tap</string>
@@ -57,4 +59,10 @@
     <string name="overlay_hint_samsung">Samsung: Settings → Apps → Bekon → Appear on top (or Display over other apps) → Allow.</string>
     <string name="overlay_hint_xiaomi">Xiaomi/MIUI: Settings → Apps → Manage apps → Bekon → Other permissions → Display pop-up windows / Display over other apps → Allow. Also check Battery saver is not restricting Bekon.</string>
     <string name="pill_next_step">Next step</string>
+    <string name="hint_notif_title">Hint from your assistant</string>
+    <string name="cue_tap">Your turn: tap “%1$s”</string>
+    <string name="cue_scroll_down">Scroll down</string>
+    <string name="cue_scroll_up">Scroll up</string>
+    <string name="cue_scroll_left">Scroll left</string>
+    <string name="cue_scroll_right">Scroll right</string>
 </resources>

@@ -83,11 +83,11 @@ object ScreenOcr {
     }
 
     /** Map image-space blocks into screen coordinates. */
-    fun toScreen(blocks: List<Block>, imageW: Int, imageH: Int, screenW: Int, screenH: Int): List<Block> {
-        if (imageW <= 0 || imageH <= 0) return blocks
+    fun toScreen(blocks: List<Block>, imageW: Int, imageH: Int, screenW: Int, screenH: Int, pillInFrame: Boolean = true): List<Block> {
+        if (imageW <= 0 || imageH <= 0) return OwnOverlay.filter(blocks, pillInFrame)
         val sx = screenW.toFloat() / imageW
         val sy = screenH.toFloat() / imageH
-        return blocks.map { b ->
+        return OwnOverlay.filter(blocks.map { b ->
             val bb = b.bounds
             b.copy(
                 bounds = intArrayOf(
@@ -97,6 +97,6 @@ object ScreenOcr {
                     (bb[3] * sy).toInt(),
                 ),
             )
-        }
+        }, pillInFrame)
     }
 }

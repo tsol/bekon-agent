@@ -131,8 +131,8 @@ Each step ends green before the next. JVM tests where the step has no device. On
 
 - Hermes JDK 21, SDK `/opt/data/.toolchain/android-sdk` (android-34, build-tools 34.0.0).
 - Prefer `/opt/data/workspace/tools/bekon-android.sh`.
-- Phone serial `<device-serial>` is USB on the host. Container has no USB.
-  Host adb: `~/Android/Sdk/platform-tools/adb -s <device-serial>`.
+- Phone serial `ab52ba8d0504` is USB on the host. Container has no USB.
+  Host adb: `/home/harry/Android/Sdk/platform-tools/adb -s ab52ba8d0504`.
 - No emulator.
 
 

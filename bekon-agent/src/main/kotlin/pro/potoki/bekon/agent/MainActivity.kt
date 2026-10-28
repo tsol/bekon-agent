@@ -491,7 +491,9 @@ private fun FooterButton(
             style = MaterialTheme.typography.labelSmall,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
             color = if (selected && enabled) MaterialTheme.colorScheme.primary else tint,
-            maxLines = 1,
+            // Two lines so longer translations ("Только просмотр") are not cut off.
+            maxLines = 2,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
 }

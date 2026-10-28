@@ -14,6 +14,7 @@ object SketchPainter {
         safeTop: Float = 4f, safeBottom: Float = 4f, safeSide: Float = 4f,
         areaW: Float = canvas.width.toFloat(), areaH: Float = canvas.height.toFloat(),
         rtl: Boolean = false,
+        phase: Float = 0f,
     ) {
         val strokeW = (9f * k).coerceAtLeast(3f)
         val pen = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -27,6 +28,15 @@ object SketchPainter {
             when (s.kind) {
                 Shape.Kind.GRID -> drawGrid(canvas, s, k, density)
                 Shape.Kind.MARK -> drawMark(canvas, s, k, density)
+                Shape.Kind.SCROLL -> {
+                    val lab0 = drawScroll(canvas, s, k, density, phase, haloLight, haloDark, pen)
+                    val lab = if (!s.lx.isNaN() && !s.ly.isNaN()) (s.lx * k) to (s.ly * k) else lab0
+                    val label = s.label
+                    if (!label.isNullOrBlank()) {
+                        val lx = if (rtl) areaW - lab.first else lab.first
+                        drawLabel(canvas, lx, lab.second, label, s.color, k, areaW, areaH, safeTop, safeBottom, safeSide)
+                    }
+                }
                 else -> {
                     pen.color = s.color
                     for (stroke in Sketch.strokes(s, seed = 7919 * (i + 1) + s.kind.ordinal)) {
@@ -49,30 +59,68 @@ object SketchPainter {
         }
     }
 
+    /**
+     * Hand-drawn chunky arrow that bounces along its direction ([phase] 0..1), with a trailing echo
+     * chevron. Returns the label anchor (canvas px), beside the arrow.
+     */
+    private fun drawScroll(c: Canvas, s: Shape, k: Float, density: Float, phase: Float, haloL: Paint, haloD: Paint, pen: Paint): Pair<Float, Float> {
+        val dx = s.x2 - s.x1; val dy = s.y2 - s.y1
+        val len = kotlin.math.hypot(dx, dy).coerceAtLeast(1f)
+        val ux = dx / len; val uy = dy / len
+        val bounce = (kotlin.math.sin(phase * 2 * Math.PI).toFloat() * 0.5f + 0.5f) * 22f * density
+        val ox = ux * bounce; val oy = uy * bounce
+        pen.color = s.color
+        val p0 = Paint(pen).apply { strokeWidth = pen.strokeWidth * 1.8f }
+        val hl = Paint(haloL).apply { strokeWidth = p0.strokeWidth + 7f }
+        val hd = Paint(haloD).apply { strokeWidth = p0.strokeWidth + 3f }
+        val strokes = Sketch.strokes(s.copy(kind = Shape.Kind.ARROW, x1 = s.x1 + ox, y1 = s.y1 + oy, x2 = s.x2 + ox, y2 = s.y2 + oy), seed = 4242)
+        for (st in strokes) {
+            if (st.size < 2) continue
+            val path = Path(); path.moveTo(st[0].first * k, st[0].second * k)
+            for (j in 1 until st.size) path.lineTo(st[j].first * k, st[j].second * k)
+            c.drawPath(path, hl); c.drawPath(path, hd); c.drawPath(path, p0)
+        }
+        // Echo chevron ahead of the head, fading in/out with the bounce.
+        val hx = (s.x2 + ox + ux * 34f * density) * k; val hy = (s.y2 + oy + uy * 34f * density) * k
+        val px = -uy; val py = ux; val w = 30f * density * k
+        val echo = Paint(pen).apply { alpha = (90 + 120 * (bounce / (22f * density))).toInt().coerceIn(0, 255) }
+        val ch = Path().apply {
+            moveTo(hx - ux * w * 0.8f + px * w, hy - uy * w * 0.8f + py * w); lineTo(hx, hy)
+            lineTo(hx - ux * w * 0.8f - px * w, hy - uy * w * 0.8f - py * w)
+        }
+        c.drawPath(ch, Paint(haloL).apply { strokeWidth = pen.strokeWidth + 5f }); c.drawPath(ch, echo)
+        // Label: to the side of a vertical arrow, above a horizontal one.
+        return if (kotlin.math.abs(uy) > 0.5f) ((maxOf(s.x1, s.x2) + 40f * density) * k) to (((s.y1 + s.y2) / 2f) * k)
+        else (minOf(s.x1, s.x2) * k) to ((minOf(s.y1, s.y2) - 56f * density) * k)
+    }
+
     private fun drawMark(c: Canvas, s: Shape, k: Float, density: Float) {
-        val cx = ((s.x1 + s.x2) / 2f) * k
-        val cy = ((s.y1 + s.y2) / 2f) * k
-        val r = (kotlin.math.max(kotlin.math.abs(s.x2 - s.x1), kotlin.math.abs(s.y2 - s.y1)) / 2f * k)
-            .coerceAtLeast(18f * density * k / density) // ~18dp min
-            .coerceAtLeast(22f * k)
-        // Soft pulse ring
-        val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; color = (s.color and 0x00FFFFFF) or 0x66000000.toInt()
-            strokeWidth = 4f * k
-        }
-        c.drawCircle(cx, cy, r * 1.35f, ring)
+        val l = minOf(s.x1, s.x2) * k; val r0 = maxOf(s.x1, s.x2) * k
+        val t = minOf(s.y1, s.y2) * k; val b = maxOf(s.y1, s.y2) * k
+        val r = 13f * density                       // fixed badge size: never scales with the element
+        val element = (r0 - l) > 2.2f * r || (b - t) > 2.2f * r
+        val cx: Float; val cy: Float
+        if (element) {
+            // Thin outline exactly on the element, badge just after its end (usually empty space) —
+            // never a big disc over the text the user has to read.
+            val o = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE; color = (s.color and 0x00FFFFFF) or 0xAA000000.toInt(); strokeWidth = 2f * density
+            }
+            val pad = 4f * density
+            c.drawRoundRect(l - pad, t - pad, r0 + pad, b + pad, 6f * density, 6f * density, o)
+            val right = r0 + pad + r + 3f * density
+            cx = if (right + r < c.width) right else (l - pad - r - 3f * density).coerceAtLeast(r)
+            cy = (t + b) / 2f
+        } else { cx = (l + r0) / 2f; cy = (t + b) / 2f }
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = s.color }
-        val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; color = Color.WHITE; strokeWidth = 3f * k
-        }
+        val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.WHITE; strokeWidth = 2f * density }
         c.drawCircle(cx, cy, r, fill)
         c.drawCircle(cx, cy, r, edge)
         val text = (s.label ?: "?").take(3)
         val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textAlign = Paint.Align.CENTER
-            typeface = Typeface.DEFAULT_BOLD
-            textSize = (r * 1.1f).coerceIn(18f * k, 40f * k)
+            color = ContrastPicker.textOn(s.color, (s.color ushr 24))   // from the badge fill only
+            textAlign = Paint.Align.CENTER; typeface = Typeface.DEFAULT_BOLD
+            textSize = if (text.length > 1) 12f * density else 14f * density
         }
         val fm = tp.fontMetrics
         c.drawText(text, cx, cy - (fm.ascent + fm.descent) / 2f, tp)
@@ -118,7 +166,7 @@ object SketchPainter {
         safeTop: Float, safeBottom: Float, safeSide: Float,
     ) {
         val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = Color.WHITE
+            this.color = ContrastPicker.textOn(color, (color ushr 24))   // from the label fill only
             textSize = (46f * k).coerceAtLeast(16f)
             isFakeBoldText = true
         }

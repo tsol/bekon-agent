@@ -160,9 +160,12 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
         return null
     }
 
+    private var perfN = 0
     private fun onFrame(reader: ImageReader) {
         // ImageReader can be closed (or the Image invalidated) while the listener runs — never crash the capture thread.
+        val t0 = android.os.SystemClock.uptimeMillis()
         val img = try { reader.acquireLatestImage() } catch (_: Exception) { null } ?: return
+        val lagMs = try { (System.nanoTime() - img.timestamp) / 1_000_000 } catch (_: Exception) { -1L }
         val bmp = try {
             imageToBitmap(img)
         } catch (e: IllegalStateException) {
@@ -178,6 +181,10 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
             bmp.recycle(); return
         }
         skipBlackUntil = 0L
+        val t1 = android.os.SystemClock.uptimeMillis()
+        try { pro.potoki.bekon.agent.coach.FrameTracker.onFrame(bmp, screenW, screenH) } catch (_: Exception) {}
+        if (pro.potoki.bekon.agent.coach.FrameTracker.enabled && (++perfN % 30 == 0))
+            Log.d(TAG, "frame perf: queue ${lagMs} ms, convert ${t1 - t0} ms, track ${android.os.SystemClock.uptimeMillis() - t1} ms")
         synchronized(frameLock) {
             lastFrame?.recycle()
             lastFrame = bmp

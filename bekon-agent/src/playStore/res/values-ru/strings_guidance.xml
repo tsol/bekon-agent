@@ -22,4 +22,6 @@
     <string name="access_title">Новый ассистент хочет подключиться</string>
     <string name="access_note_title">Ассистент «%1$s» просит подключиться</string>
     <string name="access_note_text">Ассистент «%1$s» просит подключиться (адрес %2$s), чтобы видеть экран и показывать подсказки. Нажмите «Разрешить» или «Отклонить».</string>
+    <string name="cap_agent">%1$s</string>
+    <string name="cap_sees">👁</string>
 </resources>
