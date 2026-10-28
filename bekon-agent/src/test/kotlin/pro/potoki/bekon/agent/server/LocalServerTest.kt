@@ -62,7 +62,7 @@ class LocalServerTest {
             header("Accept", "text/html,*/*")
         }.bodyAsText()
         assertTrue("connect block first", root.startsWith("# HOW TO CONNECT"))
-        assertTrue("chatbot line first", root.contains("do NOT stop") && root.contains("/link/start?client=chatgpt"))
+        assertTrue("chatbot line first", root.contains("do NOT stop") && root.contains("/link/start"))
         assertTrue("no blocked wording up top", !root.lowercase().contains("access denied") && !root.lowercase().contains("forbidden"))
         // Plain GET /mcp as browser → HTML with absolute/relative link-start URL first
         val gm = client.get("http://127.0.0.1:$port/mcp") {
@@ -71,13 +71,13 @@ class LocalServerTest {
         }
         val gmt = gm.bodyAsText()
         assertTrue("GET /mcp html 200", gm.status.value == 200)
-        assertTrue("GET /mcp points to link-start", gmt.contains("/link/start?client=chatgpt") && gmt.contains("You can't use MCP from here"))
+        assertTrue("GET /mcp points to link-start", gmt.contains("/link/start") && gmt.contains("You can't use MCP from here"))
         assertTrue("GET /mcp is html", gmt.contains("<a href=") || gmt.contains("<!doctype html>"))
         // Real MCP client Accept keeps plain hint (not a dead end)
         val mcpPlain = client.get("http://127.0.0.1:$port/mcp") {
             header("Accept", "application/json, text/event-stream")
         }.bodyAsText()
-        assertTrue("MCP client GET stays plain", mcpPlain.contains("POST JSON-RPC") && mcpPlain.contains("/link/start?client=chatgpt"))
+        assertTrue("MCP client GET stays plain", mcpPlain.contains("POST JSON-RPC") && mcpPlain.contains("/link/start"))
         val linkStart = client.get("http://127.0.0.1:$port/link/start") {
             header("User-Agent", "ChatGPT-User")
         }
@@ -90,6 +90,75 @@ class LocalServerTest {
             val h = client.request("http://127.0.0.1:$port$path") { method = io.ktor.http.HttpMethod.Head }
             assertTrue("HEAD $path 200 (was ${h.status.value})", h.status.value == 200)
         }
+        client.close(); srv.stop()
+    }
+
+    @Test
+    fun `Telegram preview of the link never prompts the owner, a real MCP initialize does`() = runBlocking {
+        val port = freePort()
+        val executor = FakeExecutor()
+        val asks = java.util.concurrent.atomic.AtomicInteger()
+        val gate = pro.potoki.bekon.agent.access.ClientGate(
+            object : pro.potoki.bekon.agent.access.TrustedClients { override fun autoAcceptNext() = false },
+            paused = { false }, ask = { _, _, _ -> asks.incrementAndGet(); true },
+        )
+        val srv = LocalServer(port, executor, McpHandler(executor, gate), gate = gate)
+        srv.start()
+        val client = HttpClient(CIO)
+        for (ua in listOf("TelegramBot (like TwitterBot)", "WhatsApp/2.23.20.0 A", "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)")) {
+            val r = client.get("http://127.0.0.1:$port/link/start") { header("User-Agent", ua) }
+            val b = r.bodyAsText()
+            assertTrue("preview 200 for $ua", r.status.value == 200)
+            assertTrue("OG page for $ua", b.contains("og:title") && !b.contains("ticket="))
+        }
+        // Plain GETs of the landing pages never ask either.
+        for (path in listOf("/", "/llms.txt", "/mcp", "/link/start")) client.get("http://127.0.0.1:$port$path")
+        Thread.sleep(300)
+        assertTrue("no owner prompt from previews/landing GETs (asks=${asks.get()})", asks.get() == 0)
+        val init = client.post("http://127.0.0.1:$port/mcp") {
+            contentType(ContentType.Application.Json)
+            header(pro.potoki.bekon.agent.access.ClientGate.HEADER, "real-agent")
+            setBody("""{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""")
+        }
+        assertTrue("initialize ok", init.bodyAsText().contains("bekon-agent"))
+        assertTrue("real agent connect asks once (asks=${asks.get()})", asks.get() == 1)
+        client.close(); srv.stop()
+    }
+
+    @Test
+    fun `session_info never prompts and initialize with a valid token is a silent reconnect`() = runBlocking {
+        pro.potoki.bekon.agent.access.AgentConnections.clear()
+        val port = freePort()
+        val executor = FakeExecutor()
+        val asks = java.util.concurrent.atomic.AtomicInteger()
+        val gate = pro.potoki.bekon.agent.access.ClientGate(
+            object : pro.potoki.bekon.agent.access.TrustedClients { override fun autoAcceptNext() = false },
+            paused = { false }, ask = { _, _, _ -> asks.incrementAndGet(); true },
+        )
+        val srv = LocalServer(port, executor, McpHandler(executor, gate), gate = gate)
+        srv.start()
+        val client = HttpClient(CIO)
+        val url = "http://127.0.0.1:$port/mcp"
+        val hdr = pro.potoki.bekon.agent.access.ClientGate.HEADER
+        suspend fun rpc(body: String, tok: String? = null) = client.post(url) {
+            contentType(ContentType.Application.Json); header(hdr, "stateless-agent")
+            tok?.let { header("Authorization", "Bearer $it") }; setBody(body)
+        }.bodyAsText()
+        val info = """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"session_info","arguments":{}}}"""
+        val none = rpc(info)
+        assertTrue(none, none.contains("\"alive\":false"))
+        assertTrue(asks.get() == 0)
+        val init = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"uniqueId":"stateless-agent"}}}"""
+        val first = rpc(init)
+        val tok = Regex("\"bekon_session_token\":\"([A-Za-z0-9_-]+)\"").find(first)!!.groupValues[1]
+        assertTrue(asks.get() == 1)
+        val alive = rpc(info, tok)
+        assertTrue(alive, alive.contains("\"alive\":true") && !alive.contains(tok))
+        val again = rpc(init, tok)
+        assertTrue(again, again.contains("\"reconnected\"") && !again.contains(tok))
+        val idOnly = rpc(init)
+        assertTrue("id-only init gets no token: $idOnly", !idOnly.contains(tok) && idOnly.contains("unauthorized"))
+        assertTrue("one prompt total (asks=${asks.get()})", asks.get() == 1)
         client.close(); srv.stop()
     }
 

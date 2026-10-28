@@ -170,6 +170,7 @@ class McpHandler(
         const val AUTH_INFO = "Session token: send 'Authorization: Bearer <bekon_session_token>' (or X-Bekon-Token) plus X-Bekon-Client-Id on every request; " +
             "the token was issued when the owner approved you and ends with the session or when another agent is approved."
         private val ISSUED_TOKEN = io.ktor.util.AttributeKey<String>("bekon-issued-token")
+        const val SESSION_INFO = "session_info"
         /** Tools that inject input / navigate — forbidden in guidance (playStore) mode. */
         val AUTONOMOUS_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "clipboard",
@@ -371,6 +372,17 @@ class McpHandler(
         }
         val id = req.id
         val token = ClientGate.tokenFrom(call.request.headers["Authorization"], call.request.headers[ClientGate.TOKEN_HEADER])
+        // session_info is answered BEFORE the gate: read-only, token-validated, never prompts the owner or issues a token.
+        if (req.method == "tools/call" && ((req.params as? JsonObject)?.get("name") as? JsonPrimitive)?.content == SESSION_INFO) {
+            val st = gate?.status(clientIdOf(call, req), token) ?: ClientGate.Status.ALIVE
+            val info = sessionInfoJson(st)
+            respondJson(call, JsonRpcResponse(id = id, result = buildJsonObject {
+                put("content", buildJsonArray { add(buildJsonObject { put("type", "text"); put("text", info.toString()) }) })
+                put("structuredContent", info)
+            }))
+            return
+        }
+        var reconnected = false
         when (val d = gate?.check(clientIdOf(call, req), clientIp(call), token)) {
             is ClientGate.Decision.Reject -> {
                 if (d.status == 401) {
@@ -380,9 +392,13 @@ class McpHandler(
                 } else respondJson(call, JsonRpcResponse(id = id, error = errElement(d.reason)))
                 return
             }
-            is ClientGate.Decision.Allow -> d.issuedToken?.let {
-                call.response.headers.append(ClientGate.TOKEN_HEADER, it)
-                call.attributes.put(ISSUED_TOKEN, it)
+            is ClientGate.Decision.Allow -> {
+                // A valid token on initialize = reconnect of the SAME approved session (no prompt, nothing new issued).
+                reconnected = d.issuedToken == null && token != null
+                d.issuedToken?.let {
+                    call.response.headers.append(ClientGate.TOKEN_HEADER, it)
+                    call.attributes.put(ISSUED_TOKEN, it)
+                }
             }
             null -> {}
         }
@@ -397,6 +413,7 @@ class McpHandler(
                 put("auth", AUTH_INFO)
                 put("instructions", pro.potoki.bekon.agent.handoff.AgentGuide.SERVER_INSTRUCTIONS)
                 put("deviceInfo", deviceInfoJson())
+                if (reconnected) { put("reconnected", true); put("session", sessionInfoJson(ClientGate.Status.ALIVE)) }
             }))
             "notifications/initialized" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
             "ping" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
@@ -1271,6 +1288,7 @@ class McpHandler(
         )
         tool("user_events", "Read (and consume) what the human told you from the phone's status-pill menu: back_to_app, changed_mind, new_goal {text}, cancel_all. Also attached as userEvents to wait_for_change / wait_for_script results (those return early when one arrives).", schema())
         tool("connection_info", "Bekon handoff: what this server is, its MCP endpoint and core tools.", schema())
+        tool(SESSION_INFO, "Read-only session check for stateless agents: send your saved X-Bekon-Client-Id and Authorization: Bearer <bekon_session_token>. Returns alive, status (alive|paused|no_token|invalid|replaced|missing_id), mode, readOnly, expiry. Never prompts the owner and never issues a token: call it before initialize so you don't trigger a new approval.", schema())
         tool("coach_clear", "Remove all coach marks from the phone screen (also stops a running coach_script).", schema())
         tool(
             "coach_script",
@@ -1520,6 +1538,26 @@ class McpHandler(
     private fun JsonObject.strOr(key: String): String? {
         val s = (this[key] as? JsonPrimitive)?.content ?: return null
         return s.ifBlank { null }
+    }
+
+    /** session_info payload: liveness only; never the token, other clients' ids, screen or device data. */
+    private fun sessionInfoJson(st: ClientGate.Status): JsonObject = buildJsonObject {
+        put("alive", st == ClientGate.Status.ALIVE || st == ClientGate.Status.PAUSED)
+        put("status", st.name.lowercase())
+        put("paused", st == ClientGate.Status.PAUSED)
+        if (st == ClientGate.Status.ALIVE || st == ClientGate.Status.PAUSED) {
+            put("mode", if (GUIDANCE) "guidance" else "control")
+            put("readOnly", readOnly())
+        }
+        put("expiry", "no fixed time: the token ends when the owner stops the session, disconnects you, or approves another agent")
+        put("next", when (st) {
+            ClientGate.Status.ALIVE -> "keep using your saved id and token; do NOT call initialize without the token"
+            ClientGate.Status.PAUSED -> "the owner paused the session; wait and check again, do not re-initialize"
+            ClientGate.Status.NO_TOKEN, ClientGate.Status.INVALID ->
+                "no live session for this id/token: call initialize WITHOUT a token (same saved uniqueId) to ask the owner"
+            ClientGate.Status.REPLACED -> "another agent replaced you; wait until the owner restarts the session"
+            ClientGate.Status.MISSING_ID -> ClientGate.MISSING_ID
+        })
     }
 
     private fun clientIdOf(call: ApplicationCall, req: JsonRpcRequest): String? {

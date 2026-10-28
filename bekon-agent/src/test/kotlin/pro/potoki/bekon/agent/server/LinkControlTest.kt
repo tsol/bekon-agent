@@ -220,16 +220,82 @@ class LinkControlTest {
 
 
     @Test
-    fun `link start defaults client to chatgpt when omitted`() {
-        val g = gate(true)
+    fun `link start without client uses neutral name or the agent UA, never chatgpt by default`() {
         val links = LinkControl(
-            executor = FakeEx(), gate = g, readOnly = { false },
+            executor = FakeEx(), gate = gate(true), readOnly = { false },
             root = { "https://example.test" }, settleMs = 0, waitMs = 3_000,
         )
-        val start = links.handle("GET", "/link/start", emptyMap())!!
-        assertEquals(200, start.status)
-        assertTrue(start.html!!.contains("chatgpt"))
-        assertTrue(start.html!!.contains("You are in the right place") || start.html!!.contains("link control"))
+        val plain = links.handle("GET", "/link/start", emptyMap())!!
+        assertEquals(200, plain.status)
+        assertTrue(plain.html!!.contains("<code>web-agent</code>"))
+        assertFalse(plain.html!!.contains("chatgpt"))
+        assertTrue(plain.html!!.contains("You are in the right place") || plain.html!!.contains("link control"))
+        val gpt = links.handle("GET", "/link/start", emptyMap(),
+            ua = "Mozilla/5.0 AppleWebKit/537.36; compatible; ChatGPT-User/1.0; +https://openai.com/bot")!!
+        assertTrue(gpt.html!!.contains("<code>chatgpt</code>"))
+        val named = links.handle("GET", "/link/start", mapOf("client" to "my-agent"), ua = "ChatGPT-User/1.0")!!
+        assertTrue(named.html!!.contains("<code>my-agent</code>"))
+    }
+
+    private val PREVIEW_UAS = listOf(
+        "TelegramBot (like TwitterBot)",
+        "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+        "WhatsApp/2.23.20.0 A",
+        "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        "Twitterbot/1.0",
+        "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)",
+        "Mozilla/5.0 (Windows NT 6.1; WOW64) SkypeUriPreview Preview/0.5 skype-url-preview@microsoft.com",
+        "Viber/13.3.0.4 CFNetwork/1209 Darwin/20.2.0",
+        "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        "LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)",
+        "Mozilla/5.0 (compatible; vkShare; +http://vk.com/dev/Share)",
+        "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)",
+        "Mozilla/5.0 (compatible; GPTBot/1.0; +https://openai.com/gptbot)",
+    )
+
+    @Test
+    fun `preview crawlers never create a ticket or an owner prompt`() {
+        val asks = java.util.concurrent.atomic.AtomicInteger()
+        val g = ClientGate(object : TrustedClients { override fun autoAcceptNext() = false }, paused = { false },
+            ask = { _, _, _ -> asks.incrementAndGet(); true })
+        val links = LinkControl(executor = FakeEx(), gate = g, readOnly = { false },
+            root = { "https://example.test" }, settleMs = 0, waitMs = 300)
+        for (ua in PREVIEW_UAS) {
+            assertTrue(ua, LinkPreview.isPreview(ua))
+            for (path in listOf("/link/start", "/link/wait", "/s/abc/screen", "/s/abc/do/xyz")) {
+                val p = links.handle("GET", path, mapOf("client" to "chatgpt", "ticket" to "t"), ua = ua)!!
+                assertEquals(200, p.status)
+                assertTrue(p.html!!.contains("og:title"))
+                assertFalse(p.html!!.contains("/link/wait?ticket="))
+            }
+        }
+        // Prefetch headers (browser/messenger prefetch) are previews too, whatever the UA.
+        assertTrue(LinkPreview.isPreview("Mozilla/5.0", header = { if (it == "Sec-Purpose") "prefetch;prerender" else null }))
+        Thread.sleep(400)
+        assertEquals("no owner prompt from previews", 0, asks.get())
+        assertNull(g.tokenFor("chatgpt"))
+    }
+
+    @Test
+    fun `plain GET of the start page never prompts but the agent wait link does`() {
+        val asks = java.util.concurrent.atomic.AtomicInteger()
+        val g = ClientGate(object : TrustedClients { override fun autoAcceptNext() = false }, paused = { false },
+            ask = { _, _, _ -> asks.incrementAndGet(); true })
+        val links = LinkControl(executor = FakeEx(), gate = g, readOnly = { false },
+            root = { "https://example.test" }, settleMs = 0, waitMs = 3_000)
+        val ua = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot"
+        assertFalse(LinkPreview.isPreview(ua))
+        val start = links.handle("GET", "/link/start", emptyMap(), ua = ua)!!
+        // Unknown browser-like UA (a preview that pretends to be a browser) only gets the start page, too.
+        links.handle("GET", "/link/start", emptyMap(), ua = "Mozilla/5.0 (Macintosh) Safari/605.1.15")!!
+        Thread.sleep(300)
+        assertEquals("start page alone never asks", 0, asks.get())
+        val ticket = Regex("""ticket=([A-Za-z0-9_-]+)""").find(start.html!!)!!.groupValues[1]
+        val wait = links.handle("GET", "/link/wait", mapOf("ticket" to ticket), ua = ua)!!
+        assertEquals(200, wait.status)
+        assertTrue(wait.html!!.contains("Approved"))
+        assertEquals("agent connect asks once", 1, asks.get())
+        assertTrue(g.tokenFor("chatgpt") != null)
     }
 
 }

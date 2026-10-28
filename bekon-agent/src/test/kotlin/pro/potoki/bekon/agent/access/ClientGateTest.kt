@@ -93,4 +93,57 @@ class ClientGateTest {
         assertTrue(ClientGate.constantTimeEquals("same", "same"))
         assertTrue(!ClientGate.constantTimeEquals("same", "samf"))
     }
+
+    @Test fun sameIdWithoutTokenIsNeverSilentlyReapprovedOrGivenTheToken() {
+        // Proposal 1 as literally written (id-only reconnect) would hand the token to anyone who knows the id.
+        var asks = 0
+        val gate = ClientGate(Auto(), paused = { false }, ask = { _, _, _ -> asks++; true })
+        val tok = allowed(gate.check("stateless-1", "1.1.1.1", null)).issuedToken!!
+        repeat(3) {
+            val r = rejected(gate.check("stateless-1", "9.9.9.9", null))
+            assertEquals(401, r.status)
+            assertTrue(!r.reason.contains(tok))
+        }
+        // id + valid token = silent reconnect of the same session (no prompt, no new token, same scope).
+        assertNull(allowed(gate.check("stateless-1", "1.1.1.1", tok)).issuedToken)
+        assertEquals(1, asks)
+        // Stopped session: token dies, status says invalid, re-initialize asks the owner again.
+        gate.reset()
+        assertEquals(ClientGate.Status.INVALID, gate.status("stateless-1", tok))
+        assertEquals(401, rejected(gate.check("stateless-1", "1.1.1.1", tok)).status)
+        assertNotEquals(tok, allowed(gate.check("stateless-1", "1.1.1.1", null)).issuedToken)
+        assertEquals(2, asks)
+    }
+
+    @Test fun statusNeverAsksIssuesOrLeaks() {
+        var asks = 0
+        var paused = false
+        val gate = ClientGate(Auto(), paused = { paused }, ask = { _, _, _ -> asks++; true })
+        assertEquals(ClientGate.Status.NO_TOKEN, gate.status("a", null))
+        assertEquals(ClientGate.Status.MISSING_ID, gate.status(null, null))
+        assertEquals(0, asks)
+        val tok = allowed(gate.check("a", "1.1.1.1", null)).issuedToken!!
+        assertEquals(ClientGate.Status.ALIVE, gate.status("a", tok))
+        assertEquals(ClientGate.Status.INVALID, gate.status("a", tok + "x"))
+        assertEquals(ClientGate.Status.INVALID, gate.status("b", tok))
+        assertEquals(ClientGate.Status.NO_TOKEN, gate.status("a", null))
+        paused = true
+        assertEquals(ClientGate.Status.PAUSED, gate.status("a", tok))
+        assertEquals("paused is only revealed to the token holder", ClientGate.Status.INVALID, gate.status("b", "zzz"))
+        assertEquals(1, asks)
+    }
+
+    @Test fun onlyOneOwnerPromptAtATimeNewIdsGetApprovalPending() {
+        val asks = java.util.concurrent.atomic.AtomicInteger()
+        val release = java.util.concurrent.CountDownLatch(1)
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val gate = ClientGate(Auto(), paused = { false }, ask = { _, _, _ -> asks.incrementAndGet(); entered.countDown(); release.await(); true })
+        var first: ClientGate.Decision? = null
+        val t = Thread { first = gate.check("first", "1.1.1.1", null) }.also { it.start() }
+        entered.await()
+        repeat(5) { i -> assertEquals(ClientGate.APPROVAL_PENDING, rejected(gate.check("fresh-$i", "1.1.1.1", null)).reason) }
+        release.countDown(); t.join()
+        assertNotNull(allowed(first!!).issuedToken)
+        assertEquals(1, asks.get())
+    }
 }

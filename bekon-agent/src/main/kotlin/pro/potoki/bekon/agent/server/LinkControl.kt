@@ -16,7 +16,8 @@ import java.util.concurrent.ConcurrentHashMap
  * FALLBACK "control by links" for plain chatbots that can only open URLs (no POST, no headers, maybe no images).
  * MCP stays the primary path — see AgentGuide.connectBlock.
  *
- * Flow: /link/start?client=<name> -> owner Allow dialog -> /link/wait returns /s/<token>/screen.
+ * Flow: /link/start[?client=<name>] (no prompt; previews/crawlers get an OG page) -> agent opens /link/wait ->
+ * owner Allow dialog -> /link/wait returns /s/<token>/screen.
  * Token is the same per-session ClientGate token (dies on Stop / replacement, never persisted); only in this
  * mode it travels in the URL path. Every action link carries a one-shot nonce bound to a snapshot.
  * Coach (highlight / arrow / hint / clear) is allowed in read-only: drawing only, same as MCP coach tools.
@@ -61,7 +62,13 @@ class LinkControl(
         object Clear : Act("cleared highlights")
     }
 
-    private data class Ticket(val clientId: String, @Volatile var token: String? = null, @Volatile var err: String? = null)
+    private data class Ticket(
+        val clientId: String,
+        @Volatile var token: String? = null,
+        @Volatile var err: String? = null,
+        val asked: java.util.concurrent.atomic.AtomicBoolean = java.util.concurrent.atomic.AtomicBoolean(false),
+        val at: Long = System.currentTimeMillis(),
+    )
     private data class Nonce(val token: String, val act: Act, val at: Long = System.currentTimeMillis())
 
     private val tickets = ConcurrentHashMap<String, Ticket>()
@@ -69,11 +76,19 @@ class LinkControl(
     private val rnd = SecureRandom()
     private val MAX_NONCES = 400
     private val NONCE_TTL_MS = 10 * 60_000L
+    private val TICKET_TTL_MS = 15 * 60_000L
+    private val MAX_TICKETS = 64
 
-    fun handle(method: String, path: String, query: Map<String, String>): Page? {
+    fun handle(method: String, path: String, query: Map<String, String>, ua: String? = null, header: (String) -> String? = { null }): Page? {
         if (method != "GET" && method != "HEAD") return null
+        // Messenger link previews / crawlers: harmless OG page; never a ticket, token, nonce or owner prompt.
+        if ((path.startsWith("/link/") || path.startsWith("/s/")) && LinkPreview.isPreview(ua, header))
+            return Page(200, LinkPreview.page())
         when {
-            path == "/link/start" -> return start((query["client"] ?: query["name"] ?: "chatgpt").ifBlank { "chatgpt" })
+            path == "/link/start" -> return start(
+                (query["client"] ?: query["name"])?.trim()?.ifBlank { null }
+                    ?: LinkPreview.agentName(ua) ?: LinkPreview.NEUTRAL_CLIENT,
+            )
             path == "/link/wait" -> return wait(query["ticket"] ?: "")
             path.matches(Regex("""^/s/[^/]+/screen/?$""")) -> {
                 val tok = path.split('/')[2]
@@ -96,13 +111,34 @@ class LinkControl(
     }
 
     private fun start(raw: String): Page {
-        val client = raw.trim().take(48).ifEmpty { "chatgpt" }
+        val client = raw.trim().take(48).ifEmpty { LinkPreview.NEUTRAL_CLIENT }
         if (!client.matches(Regex("""[A-Za-z0-9._@+\-]{1,48}""")))
             return html(400, "client must be 1–48 chars: letters, digits, . _ @ + -")
-        val g = gate ?: return html(503, "Session not ready.")
+        if (gate == null) return html(503, "Session not ready.")
+        // Opening the start page asks nobody: a messenger preview or crawler may fetch it. The owner's Allow
+        // prompt starts only when the agent opens the /link/wait link (an explicit connect action).
+        pruneTickets()
         val ticket = rand()
-        val t = Ticket(client)
-        tickets[ticket] = t
+        tickets[ticket] = Ticket(client)
+        val wait = abs("/link/wait?ticket=$ticket")
+        return html(200, """
+            <h1>Bekon — ${if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "link guidance" else "link control"}</h1>
+            <p><b>You are in the right place.</b> ${if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "This is how chatbots that can only open web pages see the screen and show the owner hints; the owner does every tap (no MCP/POST)." else "This is how chatbots that can only open web pages control the phone (no MCP/POST)."}</p>
+            <p>To connect as <code>${esc(client)}</code>, open this link now. Opening it asks the phone owner to tap <b>Allow</b>
+            (refresh it until approved):</p>
+            <p><a href="$wait">$wait</a></p>
+            <p>After approval you get <code>/s/&lt;token&gt;/screen</code>. Keep the owner informed with
+            <code>/s/&lt;token&gt;/status?text=…</code> and finish with
+            <code>/s/&lt;token&gt;/done?text=…</code>.</p>
+            <p>If you can POST JSON-RPC, MCP at <code>/mcp</code> is also available — but you do not need it here.</p>
+        """.trimIndent())
+    }
+
+
+    /** The agent's explicit connect action (first /link/wait): only now does the owner see Allow/Deny. */
+    private fun ask(t: Ticket) {
+        val g = gate ?: run { t.err = "Session not ready."; return }
+        val client = t.clientId
         Thread {
             try {
                 when (val d = g.check(client, "link", null)) {
@@ -122,23 +158,19 @@ class LinkControl(
                 }
             } catch (e: Exception) { t.err = e.message ?: "error" }
         }.apply { isDaemon = true; name = "bekon-link-ask"; start() }
-        val wait = abs("/link/wait?ticket=$ticket")
-        return html(200, """
-            <h1>Bekon — ${if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "link guidance" else "link control"}</h1>
-            <p><b>You are in the right place.</b> ${if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "This is how chatbots that can only open web pages see the screen and show the owner hints; the owner does every tap (no MCP/POST)." else "This is how chatbots that can only open web pages control the phone (no MCP/POST)."}</p>
-            <p>Ask the phone owner to tap <b>Allow</b> for client <code>${esc(client)}</code>.</p>
-            <p>Then open (or refresh):</p>
-            <p><a href="$wait">$wait</a></p>
-            <p>After approval you get <code>/s/&lt;token&gt;/screen</code>. Keep the owner informed with
-            <code>/s/&lt;token&gt;/status?text=…</code> and finish with
-            <code>/s/&lt;token&gt;/done?text=…</code>.</p>
-            <p>If you can POST JSON-RPC, MCP at <code>/mcp</code> is also available — but you do not need it here.</p>
-        """.trimIndent())
     }
 
+    /** Unasked tickets (e.g. from crawlers) expire; keep the map small. */
+    private fun pruneTickets() {
+        val now = System.currentTimeMillis()
+        tickets.entries.removeIf { now - it.value.at > TICKET_TTL_MS }
+        if (tickets.size >= MAX_TICKETS) tickets.entries.sortedBy { it.value.at }.take(tickets.size - MAX_TICKETS + 1)
+            .forEach { tickets.remove(it.key) }
+    }
 
     private fun wait(ticket: String): Page {
-        val t = tickets[ticket] ?: return html(404, "Unknown or expired ticket. Start again at /link/start?client=…")
+        val t = tickets[ticket] ?: return html(404, "Unknown or expired ticket. Start again at /link/start")
+        if (t.asked.compareAndSet(false, true)) ask(t)
         val deadline = System.currentTimeMillis() + waitMs
         while (System.currentTimeMillis() < deadline) {
             t.token?.let { tok ->
@@ -155,7 +187,7 @@ class LinkControl(
             }
             t.err?.let { e ->
                 tickets.remove(ticket)
-                return html(403, "Not approved: ${esc(e)}. Start again at /link/start?client=…")
+                return html(403, "Not approved: ${esc(e)}. Start again at /link/start")
             }
             Thread.sleep(400)
         }
@@ -175,7 +207,7 @@ class LinkControl(
     }
 
     private fun screen(token: String, note: String? = null, usedStale: Boolean = false, from: Int = 0): Page {
-        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start?client=…")
+        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start")
         return try {
             AgentConnections.busy {
                 val snap = executor.snapshot()
@@ -461,7 +493,7 @@ class LinkControl(
      * Not nonce-bound: agents build the URL with their own text (like /open). Auth is the session token in the path.
      */
     private fun setStatus(token: String, raw: String?, done: Boolean): Page {
-        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start?client=…")
+        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start")
         if (gate?.isPaused() == true) return html(403, esc(ClientGate.PAUSED))
         val text = (raw ?: "").trim()
         if (text.isEmpty()) {
@@ -727,7 +759,7 @@ class LinkControl(
 
     /** Link-mode: in-memory OCR nav breadcrumb (guidance). Same data as MCP nav_history. */
     private fun navHistoryPage(token: String, limit: Int): Page {
-        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start?client=…")
+        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start")
         val st = pro.potoki.bekon.agent.nav.NavJournal.state(limit)
         val base = abs("/s/$token")
         val sb = StringBuilder()
@@ -755,7 +787,7 @@ class LinkControl(
 
     /** Link-mode: current OCR screen fingerprint (guidance). Same as MCP current_screen_fingerprint. */
     private fun fingerprintPage(token: String): Page {
-        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start?client=…")
+        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start")
         val st = pro.potoki.bekon.agent.nav.NavJournal.state(1)
         val base = abs("/s/$token")
         val sb = StringBuilder()

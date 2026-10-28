@@ -52,6 +52,10 @@ curl -s $mcp -H 'Content-Type: application/json' -H '$hdr: my-agent-1' \
   Without it an approved id gets HTTP 401. The token ends when the session stops or the owner approves
   another agent; then call `initialize` again WITHOUT a token to be approved again. Nothing is remembered
   between sessions.
+- **Stateless agents** (each tool call is a new process): generate your id ONCE and save it with the token
+  to a file/config that survives between runs; never mint a new id per call (each new id = a new owner prompt).
+  Before re-initializing, call tool `session_info` with the saved id + token: it never prompts the owner and
+  tells you whether the session is still alive. `initialize` with a valid token is a silent reconnect.
 
 ```
 curl -s $mcp -H 'Content-Type: application/json' -H '$hdr: my-agent-1' \
@@ -150,12 +154,14 @@ short captions). The human does every tap, swipe and keystroke themselves. There
   the same id as `params.clientInfo.uniqueId` in `initialize`.
 - The owner approves you on the phone. The approved response carries `bekon_session_token` (also the
   `X-Bekon-Token` header); send `Authorization: Bearer <token>` on every later request.
+- Stateless agents: save your id + token to a file between runs (never a new id per call) and call
+  `session_info` (never prompts) before re-initializing.
 
 ## Device language
 - UI locale `${pro.potoki.bekon.agent.status.AgentStatus.localeTag()}` (${pro.potoki.bekon.agent.status.AgentStatus.languageName()}). Write hints in this language.
 
 ## Tools
-${Handoff.GUIDANCE_TOOLS}, connection_info, device_setup_guide, current_screen_fingerprint, nav_mark.
+${Handoff.GUIDANCE_TOOLS}, connection_info, session_info, device_setup_guide, current_screen_fingerprint, nav_mark.
 
 ## Hint loop
 1. `ocr_screen` or `find_text` {text, contains:true} to locate the target on the CURRENT screen.
@@ -179,7 +185,7 @@ ${SERVER_INSTRUCTIONS}
     fun urls(baseUrl: String?): Triple<String, String, String> {
         val root = baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/mcp")?.takeIf { it.isNotEmpty() }
         val mcp = root?.let { "$it/mcp" } ?: "/mcp"
-        val link = root?.let { "$it/link/start?client=chatgpt" } ?: "/link/start?client=chatgpt"
+        val link = root?.let { "$it/link/start" } ?: "/link/start"
         val r = root ?: ""
         return Triple(r, mcp, link)
     }
@@ -189,12 +195,12 @@ ${SERVER_INSTRUCTIONS}
      * NOT to stop — absolute link-start URL is line 1.
      */
     fun connectBlock(mcp: String, root: String = ""): String {
-        val link = (root.trimEnd('/').ifEmpty { null }?.let { "$it/link/start?client=chatgpt" })
-            ?: "/link/start?client=chatgpt"
+        val link = (root.trimEnd('/').ifEmpty { null }?.let { "$it/link/start" })
+            ?: "/link/start"
         return """
 # HOW TO CONNECT (read first)
 - **If you are a chatbot that can only open web pages (ChatGPT etc.), do NOT stop — open this link now:** $link
-  (Owner taps Allow on the phone; then use the one-shot ${if (GUIDANCE) "hint" else "action"} links. No MCP/POST needed.)
+  (Then open the wait link it shows: that asks the owner to tap Allow on the phone; optional ?client=<your-name>. Then use the one-shot ${if (GUIDANCE) "hint" else "action"} links. No MCP/POST needed.)
 - **Preferred when you can POST — MCP:** JSON-RPC 2.0 at $mcp (details below), or ask the user to add $mcp as a custom MCP connector (Streamable HTTP, no auth).
 - The owner approves you on the phone; nothing else is needed (no account, no API key).
 """.trimStart()

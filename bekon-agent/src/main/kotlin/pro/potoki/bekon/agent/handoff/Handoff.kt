@@ -21,7 +21,7 @@ object Handoff {
     /** Very short prompt encoded in the QR and copied by "Copy for agent". Leads with link mode for chatbots. */
     fun text(url: String): String {
         val r = root(url)
-        val link = "$r/link/start?client=chatgpt"
+        val link = "$r/link/start"
         if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) {
             return "Bekon phone (guidance: you see the screen and show hints; the owner taps). If you can only open web pages (ChatGPT etc.), open $link " +
                 "(owner taps Allow, then use the hint links). MCP (if you can POST): $r/mcp — guide: $r/"

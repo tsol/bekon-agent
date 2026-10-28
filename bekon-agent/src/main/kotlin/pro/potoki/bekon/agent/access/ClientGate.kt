@@ -28,6 +28,21 @@ class ClientGate(
 
     /** clientId -> token for the current session (at most one: one agent at a time). */
     private val tokens = HashMap<String, String>()
+    /** The client id whose owner prompt is open right now (null = none) and how many requests wait on it. */
+    private var pendingId: String? = null
+    private var pendingWaiters = 0
+
+    /** Read-only liveness of [clientId]'s session for [token]. Never asks the owner, never issues or extends anything. */
+    enum class Status { ALIVE, PAUSED, NO_TOKEN, INVALID, REPLACED, MISSING_ID }
+
+    fun status(clientId: String?, token: String?): Status {
+        val id = clientId?.trim()?.takeIf { it.isNotEmpty() } ?: return Status.MISSING_ID
+        if (AgentConnections.wasReplaced(id)) return Status.REPLACED
+        val presented = token?.trim()?.takeIf { it.isNotEmpty() } ?: return Status.NO_TOKEN
+        val expected = synchronized(this) { tokens[id] }
+        if (expected == null || !constantTimeEquals(expected, presented)) return Status.INVALID
+        return if (paused()) Status.PAUSED else Status.ALIVE
+    }
 
     fun check(clientId: String?, ip: String, token: String?): Decision {
         if (paused()) return Decision.Reject(PAUSED)
@@ -48,7 +63,18 @@ class ClientGate(
         // same id joins the pending decision; both approved requests then receive the same token.
         val other = AgentConnections.active()?.takeIf { it != id && !AgentConnections.isIdle() }
         val auto = other == null && clients.autoAcceptNext() && synchronized(this) { tokens.isEmpty() } && AgentConnections.active() == null
-        if (!auto && !ask(id, ip, other)) return Decision.Reject(if (other != null) BUSY else DENIED)
+        if (!auto) {
+            // At most ONE owner prompt at a time: while it is open, other new ids are told to wait instead of stacking
+            // more prompts (stateless agents that mint a new id per call used to cause an avalanche). Same id joins it.
+            synchronized(this) {
+                if (pendingId != null && pendingId != id) return Decision.Reject(APPROVAL_PENDING)
+                pendingId = id; pendingWaiters++
+            }
+            val allowed = try { ask(id, ip, other) } finally {
+                synchronized(this) { if (--pendingWaiters <= 0) { pendingWaiters = 0; pendingId = null } }
+            }
+            if (!allowed) return Decision.Reject(if (other != null) BUSY else DENIED)
+        }
         val issued = issue(id)
         AgentConnections.mark(id)
         return Decision.Allow(issued)
@@ -100,6 +126,9 @@ class ClientGate(
                 "Put it in the X-Bekon-Client-Id header on every request, " +
                 "and in initialize params as clientInfo.uniqueId."
         const val DENIED = "access declined"
+        const val APPROVAL_PENDING =
+            "approval_pending: the owner is already being asked to approve another client id. Do not retry with new ids. " +
+                "Use ONE stable uniqueId (save it to a file/config and reuse it across runs), wait, then retry."
         const val BUSY = "another agent is connected to this phone and the owner did not replace it. Only one agent at a time; ask the owner."
         const val REPLACED = "this agent was replaced by another agent on this phone; access declined until the owner restarts the session."
         const val TOKEN_REQUIRED =
@@ -113,6 +142,13 @@ class ClientGate(
             "Approved by the owner. From now on send 'Authorization: Bearer <bekon_session_token>' (or header X-Bekon-Token) " +
                 "together with X-Bekon-Client-Id on EVERY request of this session. The token is valid only until the session stops " +
                 "or another agent is approved; after that you get 401 and must initialize again without a token."
+        /** For agents whose every tool call is a fresh process (no shared memory). */
+        const val STATELESS_INSTRUCTIONS =
+            "Stateless agents (every call is a new process): generate your uniqueId ONCE and save it, together with " +
+                "bekon_session_token, to a file/config that survives between runs; reuse both on every call. Never mint a new id " +
+                "per call: each new id is a new approval prompt for the owner. Before calling initialize again, call the " +
+                "session_info tool with your saved id and token: it never prompts the owner and says whether the session is still " +
+                "alive. Only if it is not alive, initialize WITHOUT a token to be approved again."
         private val SHORTCUT_INSTRUCTIONS: String =
             if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "" else (
                 " After you connect, call shortcuts before hunting through the home screen. " +
@@ -127,7 +163,7 @@ class ClientGate(
                 "bekon_session_token (also in the X-Bekon-Token response header). Send 'Authorization: Bearer <token>' on every " +
                 "later request. Tokens are per session and are never remembered: each new session needs a new approval. " +
                 "Only ONE agent can be connected at a time: a second id must be approved by the owner as a replacement, which revokes " +
-                "the previous agent's token." + (if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "" else SHORTCUT_INSTRUCTIONS)
+                "the previous agent's token. " + STATELESS_INSTRUCTIONS + (if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "" else SHORTCUT_INSTRUCTIONS)
     }
 }
 
