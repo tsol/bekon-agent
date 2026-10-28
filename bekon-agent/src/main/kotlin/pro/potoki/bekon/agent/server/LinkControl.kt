@@ -141,21 +141,22 @@ class LinkControl(
         val client = t.clientId
         Thread {
             try {
-                when (val d = g.check(client, "link", null)) {
-                    is ClientGate.Decision.Allow -> {
-                        val tok = d.issuedToken ?: g.tokenFor(client)
-                        if (tok != null) { t.token = tok; AgentConnections.mark(client) }
-                        else t.err = "approved but no token"
-                    }
-                    is ClientGate.Decision.Reject -> {
-                        // Already approved this session (MCP or earlier link): reuse the existing token.
-                        if (d.reason == ClientGate.TOKEN_REQUIRED || d.status == 401) {
-                            val tok = g.tokenFor(client)
-                            if (tok != null) { t.token = tok; AgentConnections.mark(client) }
-                            else t.err = d.reason
-                        } else t.err = d.reason
+                // Poll the owner's decision with the pending token until Allow/Deny/expiry (the prompt lives ~2 min).
+                var pending: String? = null
+                val deadline = System.currentTimeMillis() + TICKET_TTL_MS
+                while (System.currentTimeMillis() < deadline) {
+                    when (val d = g.check(client, "link", pending)) {
+                        is ClientGate.Decision.Pending -> { pending = d.token; continue }
+                        is ClientGate.Decision.Allow -> {
+                            val tok = d.issuedToken ?: pending ?: g.tokenFor(client)
+                            if (tok != null) { t.token = tok; AgentConnections.mark(client) } else t.err = "approved but no token"
+                            return@Thread
+                        }
+                        // Never hand out an already-approved id's token without the owner (the id is not a secret).
+                        is ClientGate.Decision.Reject -> { t.err = d.reason; return@Thread }
                     }
                 }
+                t.err = ClientGate.PROMPT_CLOSED
             } catch (e: Exception) { t.err = e.message ?: "error" }
         }.apply { isDaemon = true; name = "bekon-link-ask"; start() }
     }

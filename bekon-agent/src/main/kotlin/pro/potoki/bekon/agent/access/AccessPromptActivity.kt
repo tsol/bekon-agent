@@ -63,8 +63,8 @@ class AccessPromptActivity : Activity() {
         private const val EXTRA_CLIENT = "clientId"
         private const val CHANNEL = "bekon_access"
         private const val NOTE_ID = 42
-        /** How long one HTTP request waits. The prompt itself lives a bit longer so a retry joins it. */
-        private const val WAIT_SECONDS = 60L
+        /** How long the prompt waits for the owner (ClientGate runs it on its own thread; requests poll it). */
+        private const val WAIT_SECONDS = 120L
         private const val PROMPT_GRACE_MS = 30_000L
         private val pending = ConcurrentHashMap<String, Pending>()
         private val handler = android.os.Handler(android.os.Looper.getMainLooper())

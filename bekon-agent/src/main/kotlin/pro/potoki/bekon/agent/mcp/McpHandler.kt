@@ -168,9 +168,11 @@ class McpHandler(
                 "Build every hint from the CURRENT screen, never from remembered layouts. Never ask the human to type 'done'."
         const val READ_ONLY = "device is in read-only mode so this action was declined."
         const val AUTH_INFO = "Session token: send 'Authorization: Bearer <bekon_session_token>' (or X-Bekon-Token) plus X-Bekon-Client-Id on every request; " +
-            "the token was issued when the owner approved you and ends with the session or when another agent is approved."
+            "the token is handed out in your first initialize response (approved, or approval_pending in error.data), becomes valid when the owner taps Allow, " +
+            "and ends with the session or when another agent is approved."
         private val ISSUED_TOKEN = io.ktor.util.AttributeKey<String>("bekon-issued-token")
         const val SESSION_INFO = "session_info"
+        const val APPROVAL_HEADER = "X-Bekon-Approval"
         /** Tools that inject input / navigate — forbidden in guidance (playStore) mode. */
         val AUTONOMOUS_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "clipboard",
@@ -392,9 +394,25 @@ class McpHandler(
                 } else respondJson(call, JsonRpcResponse(id = id, error = errElement(d.reason)))
                 return
             }
+            is ClientGate.Decision.Pending -> {
+                // Owner has not answered yet: hand out the (not yet valid) token NOW so a stateless caller can't lose it.
+                call.response.headers.append(ClientGate.TOKEN_HEADER, d.token)
+                call.response.headers.append(APPROVAL_HEADER, "pending")
+                call.response.headers.append("Retry-After", "3")
+                call.respondText(json.encodeToString(JsonRpcResponse.serializer(), JsonRpcResponse(id = id, error = buildJsonObject {
+                    put("code", ClientGate.PENDING_CODE); put("message", ClientGate.PENDING_MESSAGE)
+                    put("data", buildJsonObject {
+                        put("status", "approval_pending"); put("approval", "pending")
+                        put(ClientGate.TOKEN_FIELD, d.token); put("retry_after_s", 3)
+                        put("next", "save the token; repeat initialize with the same uniqueId and Authorization: Bearer <token> until approval=approved")
+                    })
+                })), ContentType.Application.Json)
+                return
+            }
             is ClientGate.Decision.Allow -> {
                 // A valid token on initialize = reconnect of the SAME approved session (no prompt, nothing new issued).
                 reconnected = d.issuedToken == null && token != null
+                call.response.headers.append(APPROVAL_HEADER, "approved")
                 d.issuedToken?.let {
                     call.response.headers.append(ClientGate.TOKEN_HEADER, it)
                     call.attributes.put(ISSUED_TOKEN, it)
@@ -413,6 +431,7 @@ class McpHandler(
                 put("auth", AUTH_INFO)
                 put("instructions", pro.potoki.bekon.agent.handoff.AgentGuide.SERVER_INSTRUCTIONS)
                 put("deviceInfo", deviceInfoJson())
+                if (gate != null) put("approval", "approved")
                 if (reconnected) { put("reconnected", true); put("session", sessionInfoJson(ClientGate.Status.ALIVE)) }
             }))
             "notifications/initialized" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
@@ -1555,6 +1574,7 @@ class McpHandler(
             ClientGate.Status.PAUSED -> "the owner paused the session; wait and check again, do not re-initialize"
             ClientGate.Status.NO_TOKEN, ClientGate.Status.INVALID ->
                 "no live session for this id/token: call initialize WITHOUT a token (same saved uniqueId) to ask the owner"
+            ClientGate.Status.PENDING -> "the owner has not tapped Allow yet: repeat initialize with the same uniqueId and this token every 3-5 s"
             ClientGate.Status.REPLACED -> "another agent replaced you; wait until the owner restarts the session"
             ClientGate.Status.MISSING_ID -> ClientGate.MISSING_ID
         })

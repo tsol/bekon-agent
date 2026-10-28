@@ -21,7 +21,7 @@ Two builds come from the same source:
 
 ## Verify this build / ask your agent to audit
 
-Every release is tagged with its version (`v1.0.1` … `v1.0.36`, …). The app's
+Every release is tagged with its version (`v1.0.1` … `v1.0.37`, …). The app's
 "ask your agent to check our code" button opens the tag matching the installed version, for example
 <https://github.com/tsol/bekon-agent/tree/v1.0.9>.
 

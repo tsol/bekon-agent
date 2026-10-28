@@ -107,6 +107,13 @@ class LocalServer(
                             } else call.respond(HttpStatusCode.Forbidden, ErrorResponse(d.reason))
                             return@intercept
                         }
+                        is ClientGate.Decision.Pending -> {
+                            call.response.headers.append(ClientGate.TOKEN_HEADER, d.token)
+                            call.response.headers.append(McpHandler.APPROVAL_HEADER, "pending")
+                            call.response.headers.append("Retry-After", "3")
+                            call.respond(HttpStatusCode.Accepted, ErrorResponse(ClientGate.PENDING_MESSAGE))
+                            return@intercept
+                        }
                         is ClientGate.Decision.Allow -> d.issuedToken?.let { call.response.headers.append(ClientGate.TOKEN_HEADER, it) }
                     }
                 }

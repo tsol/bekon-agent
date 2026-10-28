@@ -163,6 +163,44 @@ class LocalServerTest {
     }
 
     @Test
+    fun `stateless initialize while the owner decides returns approval_pending with the token, then approved`() = runBlocking {
+        pro.potoki.bekon.agent.access.AgentConnections.clear()
+        val port = freePort()
+        val executor = FakeExecutor()
+        val answerRef = java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
+        val gate = pro.potoki.bekon.agent.access.ClientGate(
+            object : pro.potoki.bekon.agent.access.TrustedClients { override fun autoAcceptNext() = false },
+            paused = { false }, holdMs = 200, ask = { _, _, _ -> while (answerRef.get() == null) Thread.sleep(5); answerRef.get()!! },
+        )
+        val srv = LocalServer(port, executor, McpHandler(executor, gate), gate = gate)
+        srv.start()
+        val client = HttpClient(CIO)
+        val url = "http://127.0.0.1:$port/mcp"
+        val init = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"uniqueId":"madisson-geo-2026"}}}"""
+        suspend fun call(tok: String?) = client.post(url) {
+            contentType(ContentType.Application.Json); header(pro.potoki.bekon.agent.access.ClientGate.HEADER, "madisson-geo-2026")
+            tok?.let { header("Authorization", "Bearer $it") }; setBody(init)
+        }
+        val r1 = call(null)
+        val b1 = r1.bodyAsText()
+        assertTrue("HTTP 200 for pending: ${r1.status}", r1.status.value == 200)
+        assertTrue(b1, b1.contains("\"code\":-32002") && b1.contains("approval_pending"))
+        val tok = Regex("\"bekon_session_token\":\"([A-Za-z0-9_-]{43})\"").find(b1)!!.groupValues[1]
+        assertTrue("token also in header", r1.headers["X-Bekon-Token"] == tok && r1.headers["X-Bekon-Approval"] == "pending")
+        // Tools are refused with a pending token.
+        val tl = client.post(url) { contentType(ContentType.Application.Json); header(pro.potoki.bekon.agent.access.ClientGate.HEADER, "madisson-geo-2026")
+            header("Authorization", "Bearer $tok"); setBody("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""") }.bodyAsText()
+        assertTrue(tl, tl.contains("approval_pending") && !tl.contains("\"tools\""))
+        answerRef.set(true)
+        Thread.sleep(50)
+        val r2 = call(tok).bodyAsText()
+        assertTrue(r2, r2.contains("\"approval\":\"approved\""))
+        val r3 = call(null)
+        assertTrue("id alone after approval: 401, no token", r3.status.value == 401 && !r3.bodyAsText().contains(tok))
+        client.close(); srv.stop()
+    }
+
+    @Test
     fun `health and snapshot and tap routes respond`() = runBlocking {
         // Full-flavor action links / tap tools; the playStore (guidance) build has none.
         org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)

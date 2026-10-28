@@ -298,4 +298,20 @@ class LinkControlTest {
         assertTrue(g.tokenFor("chatgpt") != null)
     }
 
+
+    @Test
+    fun `link mode never hands an already approved id its token without the owner`() {
+        val asks = java.util.concurrent.atomic.AtomicInteger()
+        val g = ClientGate(object : TrustedClients { override fun autoAcceptNext() = false }, paused = { false },
+            ask = { _, _, _ -> asks.incrementAndGet(); true })
+        val mcpTok = (g.check("victim", "1.1.1.1", null) as ClientGate.Decision.Allow).issuedToken!!
+        val links = LinkControl(executor = FakeEx(), gate = g, readOnly = { false },
+            root = { "https://example.test" }, settleMs = 0, waitMs = 1_000)
+        val start = links.handle("GET", "/link/start", mapOf("client" to "victim"), ua = "ChatGPT-User/1.0")!!
+        val ticket = Regex("""ticket=([A-Za-z0-9_-]+)""").find(start.html!!)!!.groupValues[1]
+        val wait = links.handle("GET", "/link/wait", mapOf("ticket" to ticket), ua = "ChatGPT-User/1.0")!!
+        assertFalse(wait.html!!.contains(mcpTok))
+        assertFalse(wait.html!!.contains("/s/$mcpTok"))
+        assertEquals(1, asks.get())
+    }
 }

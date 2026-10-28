@@ -44,18 +44,23 @@ curl -s $mcp -H 'Content-Type: application/json' -H '$hdr: my-agent-1' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"my-agent","version":"1","uniqueId":"my-agent-1"}}}'
 ```
 
-- A new id must be approved by the owner on the phone (a prompt appears; the call waits). If you get
-  "access declined", ask the human to tap Allow on the phone, then retry.
-- **Session token.** The approved response contains `bekon_session_token` (also in the `X-Bekon-Token`
-  response header). Send it on EVERY later request:
-  `Authorization: Bearer <token>`  (or `X-Bekon-Token: <token>`), together with `$hdr`.
-  Without it an approved id gets HTTP 401. The token ends when the session stops or the owner approves
-  another agent; then call `initialize` again WITHOUT a token to be approved again. Nothing is remembered
-  between sessions.
-- **Stateless agents** (each tool call is a new process): generate your id ONCE and save it with the token
-  to a file/config that survives between runs; never mint a new id per call (each new id = a new owner prompt).
-  Before re-initializing, call tool `session_info` with the saved id + token: it never prompts the owner and
-  tells you whether the session is still alive. `initialize` with a valid token is a silent reconnect.
+- **Approval + token, step by step** (works for stateless scripts too):
+  1. `initialize` without a token. It answers within ~10 s and ALWAYS carries `bekon_session_token`
+     (also the `X-Bekon-Token` response header). **Save it at once** with your id (file/config).
+     - `result.approval = "approved"`: you are in.
+     - `error.code = -32002` / `error.data.status = "approval_pending"`: the owner has not tapped Allow yet;
+       the token is in `error.data.bekon_session_token` and is not valid yet.
+  2. While pending: repeat `initialize` every 3-5 s with the SAME id and `Authorization: Bearer <token>`
+     (each poll answers within ~2 s) until `result.approval = "approved"`. Tell the human to tap Allow.
+  3. Send `Authorization: Bearer <token>` (or `X-Bekon-Token`) with `$hdr` on EVERY later request.
+  - An approved id WITHOUT its token gets HTTP 401 and never receives the token again (the id is not a secret).
+  - "access declined" (Deny, or no answer in ~2 min): ask the human, then start again at step 1.
+  - The token ends when the session stops or the owner approves another agent; then start again at step 1.
+    Nothing is remembered between sessions.
+- **Stateless agents** (each tool call is a new process): generate your id ONCE and save it with the token;
+  never mint a new id per call (each new id = a new owner prompt). To check a saved session, call tool
+  `session_info` with the saved id + token: it never prompts and says alive / pending / invalid.
+  `initialize` with a valid token is a silent reconnect.
 
 ```
 curl -s $mcp -H 'Content-Type: application/json' -H '$hdr: my-agent-1' \
@@ -152,10 +157,12 @@ short captions). The human does every tap, swipe and keystroke themselves. There
 ## Connect (MCP, streamable HTTP)
 - Endpoint: $mcp (JSON-RPC 2.0 over HTTP POST). Send header `$hdr: <your-stable-id>` on every request and
   the same id as `params.clientInfo.uniqueId` in `initialize`.
-- The owner approves you on the phone. The approved response carries `bekon_session_token` (also the
-  `X-Bekon-Token` header); send `Authorization: Bearer <token>` on every later request.
-- Stateless agents: save your id + token to a file between runs (never a new id per call) and call
-  `session_info` (never prompts) before re-initializing.
+- The first `initialize` ALWAYS returns `bekon_session_token` (also the `X-Bekon-Token` header): in `result`
+  when approved, or in `error.data` with `error.code = -32002` "approval_pending" while the owner decides.
+  Save it at once; while pending repeat `initialize` with the same id + `Authorization: Bearer <token>` every
+  3-5 s until `result.approval = "approved"`. Then send that header on every request.
+- Stateless agents: save your id + token to a file between runs (never a new id per call); `session_info`
+  (never prompts) says alive / pending / invalid.
 
 ## Device language
 - UI locale `${pro.potoki.bekon.agent.status.AgentStatus.localeTag()}` (${pro.potoki.bekon.agent.status.AgentStatus.languageName()}). Write hints in this language.
@@ -265,7 +272,7 @@ Allow: /s/
     fun mcpGetHint(baseUrl: String?): String {
         val (_, mcp, link) = urls(baseUrl)
         return "Bekon MCP endpoint: POST JSON-RPC 2.0 here ($mcp) with header ${ClientGate.HEADER}: <stable-id>; " +
-            "after the owner approves you, also send Authorization: Bearer <bekon_session_token>. " +
+            "save bekon_session_token from your first initialize (result, or error.data while approval_pending) and send Authorization: Bearer <it> on every request. " +
             "Web-only chatbot? Do NOT stop — open $link instead (${if (GUIDANCE) "link guidance" else "link control"}, no POST)."
     }
 }

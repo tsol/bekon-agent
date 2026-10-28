@@ -40,7 +40,9 @@ class ClientGateTest {
 
     @Test fun deniedGetsNoToken() {
         val gate = ClientGate(Auto(), paused = { false }, ask = { _, _, _ -> false })
-        assertEquals(ClientGate.DENIED, rejected(gate.check("beta", "8.8.8.8", null)).reason)
+        val r = rejected(gate.check("beta", "8.8.8.8", null))
+        assertEquals(ClientGate.PROMPT_CLOSED, r.reason)
+        assertTrue(r.reason.startsWith(ClientGate.DENIED))
     }
 
     @Test fun pauseRejectsEvenWithValidToken() {
@@ -145,5 +147,70 @@ class ClientGateTest {
         release.countDown(); t.join()
         assertNotNull(allowed(first!!).issuedToken)
         assertEquals(1, asks.get())
+    }
+
+    /** Owner prompt the test answers by hand. */
+    private class Owner {
+        val asked = java.util.concurrent.atomic.AtomicInteger()
+        @Volatile var answer: Boolean? = null
+        val shown = java.util.concurrent.CountDownLatch(1)
+        val ask: (String, String, String?) -> Boolean = { _, _, _ ->
+            asked.incrementAndGet(); shown.countDown()
+            while (answer == null) Thread.sleep(5)
+            answer!!
+        }
+    }
+
+    @Test fun slowOwnerStatelessAgentGetsTokenOnFirstCallAndPollsWithIt() {
+        val owner = Owner()
+        val gate = ClientGate(Auto(), paused = { false }, holdMs = 50, ask = owner.ask)
+        // 1st stateless call: owner hasn't tapped yet -> pending WITH the token (nothing to lose).
+        val p = gate.check("madisson-geo", "1.1.1.1", null) as ClientGate.Decision.Pending
+        assertEquals(ClientGate.Status.PENDING, gate.status("madisson-geo", p.token))
+        // The pending token is not usable yet anywhere.
+        assertNull(gate.tokenFor("madisson-geo")); assertNull(gate.clientForToken(p.token))
+        // Poll with the token: still pending, same token, no second prompt.
+        assertEquals(p.token, (gate.check("madisson-geo", "1.1.1.1", p.token) as ClientGate.Decision.Pending).token)
+        // A different new id while the prompt is open: approval_pending, no token, no prompt.
+        assertEquals(ClientGate.APPROVAL_PENDING, rejected(gate.check("other-new", "2.2.2.2", null)).reason)
+        owner.answer = true
+        // Next poll with the token: approved, token delivered (same value), now valid.
+        val ok = allowed(gate.check("madisson-geo", "1.1.1.1", p.token))
+        assertEquals(p.token, ok.issuedToken)
+        assertEquals(p.token, gate.tokenFor("madisson-geo"))
+        assertNull(allowed(gate.check("madisson-geo", "1.1.1.1", p.token)).issuedToken)
+        assertEquals(ClientGate.Status.ALIVE, gate.status("madisson-geo", p.token))
+        // The id alone never gets the token after approval.
+        val r = rejected(gate.check("madisson-geo", "9.9.9.9", null))
+        assertEquals(401, r.status); assertEquals(ClientGate.TOKEN_REQUIRED, r.reason)
+        assertEquals(1, owner.asked.get())
+    }
+
+    @Test fun ownerAllowsWithinHoldTheSameRequestGetsTheToken() {
+        val owner = Owner()
+        val gate = ClientGate(Auto(), paused = { false }, holdMs = 5_000, ask = owner.ask)
+        Thread { owner.shown.await(); Thread.sleep(50); owner.answer = true }.start()
+        val tok = allowed(gate.check("fast", "1.1.1.1", null)).issuedToken
+        assertNotNull(tok); assertEquals(tok, gate.tokenFor("fast"))
+    }
+
+    @Test fun deniedOrStoppedPendingTokenIsVoid() {
+        val owner = Owner()
+        val gate = ClientGate(Auto(), paused = { false }, holdMs = 30, ask = owner.ask)
+        val p = gate.check("d", "1.1.1.1", null) as ClientGate.Decision.Pending
+        owner.answer = false
+        Thread.sleep(50)
+        assertEquals(ClientGate.PROMPT_CLOSED, rejected(gate.check("d", "1.1.1.1", p.token)).reason)
+        assertNull(gate.tokenFor("d"))
+        // Stop while pending: a late Allow issues nothing.
+        val owner2 = Owner()
+        val g2 = ClientGate(Auto(), paused = { false }, holdMs = 30, ask = owner2.ask)
+        val p2 = g2.check("s", "1.1.1.1", null) as ClientGate.Decision.Pending
+        g2.reset()
+        owner2.answer = true
+        Thread.sleep(50)
+        assertNull(g2.tokenFor("s"))
+        assertTrue(g2.check("s", "1.1.1.1", p2.token) is ClientGate.Decision.Reject)
+        assertEquals(ClientGate.Status.INVALID, g2.status("s", p2.token))
     }
 }
