@@ -10,26 +10,30 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import pro.potoki.bekon.agent.overlay.OverlayHost
 
 /**
- * Live coach marks on the phone screen via a TYPE_ACCESSIBILITY_OVERLAY window owned by the
- * accessibility service (no SYSTEM_ALERT_WINDOW needed). Not touchable: the human taps through.
+ * Live coach marks on the phone screen.
+ * - full: TYPE_ACCESSIBILITY_OVERLAY owned by the accessibility service
+ * - guidance (playStore): TYPE_APPLICATION_OVERLAY (SYSTEM_ALERT_WINDOW)
+ * Not touchable: the human taps through.
  */
 object CoachOverlay {
     private const val TAG = "CoachOverlay"
     private val main = Handler(Looper.getMainLooper())
     private var view: MarksView? = null
     private var wm: WindowManager? = null
+    private var appContext: Context? = null
     private val clearTask = Runnable { clear() }
     @Volatile private var shownAt = 0L
     @Volatile private var windowAtShow: String? = null
     @Volatile private var lastWindow: String? = null
+    @Volatile private var lastSummary: String? = null
 
-    /**
-     * Marks are drawn in screen coordinates for one specific screen. When the human (or the
-     * agent) moves to another screen they point at the wrong thing, so drop them. A short
-     * grace period ignores the transition that is still settling when the marks are drawn.
-     */
+    fun bindAppContext(ctx: Context) {
+        appContext = ctx.applicationContext
+    }
+
     fun onWindowChanged(key: String) {
         lastWindow = key
         if (view == null || key == windowAtShow) return
@@ -38,16 +42,28 @@ object CoachOverlay {
         clear()
     }
 
-    /** Blocks briefly on the main thread. Returns false when the a11y service is not running. */
+    /** Called when NavJournal detects a fingerprint change (guidance mode). */
+    fun onScreenFingerprintChanged(fp: String) = onWindowChanged("fp:$fp")
+
+    /**
+     * @param svc accessibility service in full flavor; ignored in guidance (uses [appContext]).
+     */
     fun show(svc: AccessibilityService?, shapes: List<Shape>, append: Boolean, ttlMs: Long): Boolean {
-        if (svc == null) return false
+        val ctx: Context? = when {
+            OverlayHost.guidance -> appContext
+            else -> svc
+        }
+        if (ctx == null) return false
+        if (OverlayHost.guidance && !OverlayHost.canDraw(ctx)) return false
         var ok = false
         val latch = java.util.concurrent.CountDownLatch(1)
         main.post {
             try {
-                val v = view ?: install(svc)
+                val v = view ?: install(ctx)
                 v.shapes = if (append) v.shapes + shapes else shapes
                 v.invalidate()
+                lastSummary = shapes.joinToString("; ") { "${it.kind}:${it.label ?: ""}" }.take(120)
+                try { pro.potoki.bekon.agent.nav.NavJournal.noteHint(lastSummary) } catch (_: Exception) {}
                 onMarksChanged?.invoke()
                 main.removeCallbacks(clearTask)
                 shownAt = System.currentTimeMillis(); windowAtShow = lastWindow
@@ -61,10 +77,8 @@ object CoachOverlay {
         return ok
     }
 
-    /** Called (main thread) whenever marks appear, change or go away: the status pill re-lays out. */
     @Volatile var onMarksChanged: (() -> Unit)? = null
 
-    /** Screen-space areas covered by marks and their label bubbles (estimated), for the status pill to avoid. */
     fun markBounds(density: Float): List<android.graphics.RectF> {
         val shapes = view?.shapes ?: return emptyList()
         val out = ArrayList<android.graphics.RectF>()
@@ -87,26 +101,15 @@ object CoachOverlay {
             val v = view ?: return@post
             try { wm?.removeView(v) } catch (_: Exception) {}
             view = null
+            lastSummary = null
             onMarksChanged?.invoke()
         }
     }
 
-    private fun install(svc: AccessibilityService): MarksView {
-        val w = svc.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val v = MarksView(svc)
-        val p = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT,
-        )
-        if (Build.VERSION.SDK_INT >= 28) {
-            p.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-        }
+    private fun install(ctx: Context): MarksView {
+        val w = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val v = MarksView(ctx)
+        val p = OverlayHost.passThroughParams()
         w.addView(v, p)
         wm = w; view = v
         return v
@@ -115,7 +118,6 @@ object CoachOverlay {
     private class MarksView(ctx: Context) : View(ctx) {
         var shapes: List<Shape> = emptyList()
         override fun onDraw(canvas: Canvas) {
-            // Shapes are in real-screen coords; compensate if the window does not start at 0,0.
             val loc = IntArray(2); getLocationOnScreen(loc)
             canvas.save()
             canvas.translate(-loc[0].toFloat(), -loc[1].toFloat())
@@ -127,7 +129,12 @@ object CoachOverlay {
             val strip = BaconFrame.VISIBLE_DP * dm.density
             val top = maxOf(strip, (ins?.stableInsetTop ?: 0).toFloat(), (ins?.displayCutout?.safeInsetTop ?: 0).toFloat()) + 6f
             val bottom = maxOf(strip, (ins?.stableInsetBottom ?: 0).toFloat()) + 6f
-            SketchPainter.draw(canvas, shapes, 1f, dm.density, safeTop = top, safeBottom = bottom, safeSide = strip + 4f, areaW = sw, areaH = sh)
+            val rtl = layoutDirection == LAYOUT_DIRECTION_RTL
+            SketchPainter.draw(
+                canvas, shapes, 1f, dm.density,
+                safeTop = top, safeBottom = bottom, safeSide = strip + 4f,
+                areaW = sw, areaH = sh, rtl = rtl,
+            )
             canvas.restore()
         }
     }

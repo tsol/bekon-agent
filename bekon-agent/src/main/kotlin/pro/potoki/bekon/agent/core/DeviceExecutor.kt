@@ -35,13 +35,16 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
 
     override fun health(): Map<String, Boolean> = mapOf(
         "capture" to (screenCapture?.isActive == true),
-        "touch" to TouchService.isBound(),
-        "keyboard" to BekonImeService.isEnabled(context.contentResolver),
+        "touch" to (if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) false else TouchService.isBound()),
+        "overlay" to pro.potoki.bekon.agent.overlay.OverlayHost.canDraw(context),
+        "guidance" to pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE,
+        "keyboard" to (if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) false else BekonImeService.isEnabled(context.contentResolver)),
         "tunnel" to false, // filled by caller on the wire
     )
 
     override fun snapshot(): ScreenSnapshot {
         guardRead()
+        if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) return snapshotFromOcr()
         val controller = controller()
         if (controller == null) throw CapabilityException("touch: accessibility service not enabled")
         val raw = A11yDump.dumpJson() ?: throw CapabilityException("snapshot: no accessibility tree")
@@ -123,8 +126,14 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
         return JpegFrame(bos.toByteArray(), tw, th, if (png) "image/png" else "image/jpeg", sw, sh)
     }
 
-    override fun drawOnScreen(shapes: List<pro.potoki.bekon.agent.coach.Shape>, append: Boolean, ttlMs: Long): Boolean =
-        guardRead().let { true } && pro.potoki.bekon.agent.coach.CoachOverlay.show(TouchService.active, shapes, append, ttlMs)
+    override fun drawOnScreen(shapes: List<pro.potoki.bekon.agent.coach.Shape>, append: Boolean, ttlMs: Long): Boolean {
+        guardRead()
+        if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) {
+            pro.potoki.bekon.agent.coach.CoachOverlay.bindAppContext(context)
+            return pro.potoki.bekon.agent.coach.CoachOverlay.show(null, shapes, append, ttlMs)
+        }
+        return pro.potoki.bekon.agent.coach.CoachOverlay.show(TouchService.active, shapes, append, ttlMs)
+    }
 
     override fun clearScreen() = pro.potoki.bekon.agent.coach.CoachOverlay.clear()
 
@@ -192,7 +201,11 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
         }
     }
 
-    private fun writer(): TouchController? { guardWrite(); return controller() }
+    private fun writer(): TouchController? {
+        guardWrite()
+        if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) guidanceDenied()
+        return controller()
+    }
     private fun reader(): TouchController? { guardRead(); return controller() }
 
     /**
@@ -218,6 +231,46 @@ class DeviceExecutor(private val context: Context) : ActionExecutor, pro.potoki.
         screenCapture = null
         captureStarted = false
     }
+
+
+    /** Guidance mode: OCR the latest capture into UiNode-like items (ref e1..). */
+    private fun snapshotFromOcr(): ScreenSnapshot {
+        val sc = screenCapture ?: throw CapabilityException("capture: media permission not granted")
+        val full = sc.latestBitmap() ?: throw CapabilityException("capture: no frame")
+        val (sw, sh) = screenSizeNow()
+        try {
+            val ocr = pro.potoki.bekon.agent.ocr.ScreenOcr.recognize(full, timeoutMs = 8_000)
+            val blocks = pro.potoki.bekon.agent.ocr.ScreenOcr.toScreen(ocr.blocks, ocr.imageW, ocr.imageH, sw, sh)
+            pro.potoki.bekon.agent.nav.NavJournal.observe(blocks, sw, sh)
+            pro.potoki.bekon.agent.ocr.ScreenHistory.offerFrame(full, sw, sh, pro.potoki.bekon.agent.nav.NavJournal.currentFingerprint(), force = false)
+            val items = ArrayList<UiNode>()
+            for ((i, b) in blocks.withIndex()) {
+                val bb = b.bounds
+                items += UiNode(
+                    ref = "e${i + 1}",
+                    label = b.text,
+                    x = (bb[0] + bb[2]) / 2,
+                    y = (bb[1] + bb[3]) / 2,
+                    bounds = bb,
+                    clickable = false,
+                    checkable = false, checked = false, selected = false,
+                    enabled = true, pkg = null, statusBar = false, window = "ocr",
+                    viewId = null, cls = "ocr", editable = false,
+                )
+            }
+            val (iw, ih) = CapturePrefs.pixelSize(sw, sh, ScreenshotDefaults.SCALE)
+            return ScreenSnapshot(screenW = sw, screenH = sh, imageW = iw, imageH = ih, items = items)
+        } finally {
+            // latestBitmap may be owned by capture — do not recycle here
+        }
+    }
+
+    fun latestCaptureBitmap(): android.graphics.Bitmap? = try { screenCapture?.latestBitmap() } catch (_: Exception) { null }
+
+    fun screenSizeNow(): Pair<Int, Int> = try { realScreenSize() } catch (_: Exception) { screenSize }
+
+    private fun guidanceDenied(): Nothing =
+        throw CapabilityException("guidance_mode: Bekon only draws hints; the user performs every tap. Use coach_draw / find_text / screenshot.")
 
     private fun controller(): TouchController? = TouchService.active?.controller
 

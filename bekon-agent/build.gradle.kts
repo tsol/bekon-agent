@@ -14,22 +14,24 @@ android {
         applicationId = "pro.potoki.bekon.agent"
         minSdk = 24
         targetSdk = 36
-        versionCode = 32
-        versionName = "1.0.31"
+        versionCode = 33
+        versionName = "1.0.32"
     }
 
-    // full: sideload/dev build, ships the optional Bekon Keys IME.
-    // playStore: Google Play build, no IME in the manifest (typing uses accessibility SET_TEXT/paste).
+    // full: GitHub/sideload APK — AccessibilityService + optional Bekon Keys IME (autonomous agent).
+    // playStore: Google Play — guidance mode only (no AccessibilityService); MediaProjection + SAW overlays + OCR.
     flavorDimensions += "dist"
     productFlavors {
         create("full") {
             dimension = "dist"
             buildConfigField("boolean", "PLAY_STORE", "false")
+            buildConfigField("boolean", "GUIDANCE_MODE", "false")
             buildConfigField("boolean", "HAS_IME", "true")
         }
         create("playStore") {
             dimension = "dist"
             buildConfigField("boolean", "PLAY_STORE", "true")
+            buildConfigField("boolean", "GUIDANCE_MODE", "true")
             buildConfigField("boolean", "HAS_IME", "false")
         }
     }
@@ -123,6 +125,10 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0")
     testImplementation("io.ktor:ktor-client-core:2.3.12")
     testImplementation("io.ktor:ktor-client-cio:2.3.12")
+
+    // Bundled on-device OCR (Latin; Cyrillic UI fonts work well enough for guidance marks on modern ML Kit).
+    // playStore guidance mode uses this; full flavor also gets it for shared code paths / tests.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }

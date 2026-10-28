@@ -71,11 +71,21 @@ class McpHandler(
         const val AUTH_INFO = "Session token: send 'Authorization: Bearer <bekon_session_token>' (or X-Bekon-Token) plus X-Bekon-Client-Id on every request; " +
             "the token was issued when the owner approved you and ends with the session or when another agent is approved."
         private val ISSUED_TOKEN = io.ktor.util.AttributeKey<String>("bekon-issued-token")
+        /** Tools that inject input / navigate — forbidden in guidance (playStore) mode. */
+        val AUTONOMOUS_TOOLS = setOf(
+            "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "clipboard",
+            "coach_script", "coach_script_stop", "wait_for_script", "scan_list",
+            "shortcut_open", "shortcut_add", "shortcut_remove",
+        )
         val WRITE_TOOLS = setOf(
             "tap", "swipe", "longPress", "drag", "release", "type", "key", "nav", "shortcut_open",
             "coach_draw", "coach_clear", "open_setup_screen", "coach_script", "coach_script_stop", "scan_list",
             "open_url", "shortcut_add", "shortcut_remove",
+            "find_text", "ocr_screen", "som_marks", "nav_mark", "guidance_step",
         )
+        val GUIDANCE = pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE
+        /** Tools hidden from tools/list in guidance mode. */
+        val GUIDANCE_HIDDEN = AUTONOMOUS_TOOLS + setOf("coach_script", "wait_for_script", "scan_list")
     }
 
 
@@ -291,11 +301,30 @@ class McpHandler(
             }))
             "notifications/initialized" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
             "ping" -> respondJson(call, JsonRpcResponse(id = id, result = JsonObject(emptyMap())))
-            "tools/list" -> respondJson(call, JsonRpcResponse(id = id, result = buildJsonObject { put("tools", toolsList) }))
+            "tools/list" -> respondJson(call, JsonRpcResponse(id = id, result = buildJsonObject {
+                val tools = if (!GUIDANCE) toolsList else {
+                    val arr = toolsList as kotlinx.serialization.json.JsonArray
+                    buildJsonArray {
+                        for (el in arr) {
+                            val o = el as? JsonObject ?: continue
+                            val n = (o["name"] as? JsonPrimitive)?.content ?: continue
+                            if (n in GUIDANCE_HIDDEN) continue
+                            add(el)
+                        }
+                    }
+                }
+                put("tools", tools)
+            }))
             "tools/call" -> {
                 val params = req.params?.jsonObject ?: JsonObject(emptyMap())
                 val name = (params["name"] as? JsonPrimitive)?.content ?: ""
                 val args = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
+                if (GUIDANCE && name in AUTONOMOUS_TOOLS) {
+                    respondJson(call, JsonRpcResponse(id = id, error = errElement(
+                        "guidance_mode: Bekon only draws hints; the user performs every tap. Use coach_draw, find_text, screenshot, wait_for_change."
+                    )))
+                    return
+                }
                 if (readOnly() && name in WRITE_TOOLS) {
                     respondJson(call, JsonRpcResponse(id = id, error = errElement(READ_ONLY)))
                     return
@@ -616,7 +645,10 @@ class McpHandler(
             val append = (args["append"] as? JsonPrimitive)?.content == "true"
             val ttl = (args.intOr("ttlMs") ?: 0).toLong()
             if (!c.drawOnScreen(shapes, append, ttl)) {
-                throw CapabilityException("overlay: accessibility service (Gestures) is off. Use annotate_screenshot and show the image to the user instead.")
+                throw CapabilityException(
+                    if (GUIDANCE) "overlay: display-over-other-apps (SYSTEM_ALERT_WINDOW) is off. Open Bekon and grant overlay, or use annotate_screenshot."
+                    else "overlay: accessibility service (Gestures) is off. Use annotate_screenshot and show the image to the user instead."
+                )
             }
             if (!append) followAnchors(c, shapes, anchors) else anchorJob?.cancel()
             buildJsonObject { put("ok", true); put("text", "drew ${shapes.size} mark(s) on the phone screen. Now call wait_for_change (pass your last baseline) and read its diff; do not ask the human to say 'done'.") }
@@ -657,6 +689,216 @@ class McpHandler(
             anchorJob?.cancel()
             c.clearScreen()
             buildJsonObject { put("ok", true); put("text", "cleared") }
+        }
+        
+        "ocr_screen" -> {
+            val snap = executor.snapshot()
+            buildJsonObject {
+                put("ok", true)
+                put("count", snap.items.size)
+                put("screenW", snap.screenW); put("screenH", snap.screenH)
+                put("items", buildJsonArray {
+                    snap.items.forEach { n ->
+                        add(buildJsonObject {
+                            put("ref", n.ref); put("text", n.label)
+                            put("x", n.x); put("y", n.y)
+                            n.bounds?.let { b -> put("bounds", buildJsonArray { b.forEach { add(JsonPrimitive(it)) } }) }
+                        })
+                    }
+                })
+                put("fingerprint", pro.potoki.bekon.agent.nav.NavJournal.currentFingerprint() ?: "")
+                put("text", "ocr ${snap.items.size} text block(s). Use find_text or coach_draw with ref/bounds; user taps.")
+            }
+        }
+        "find_text" -> {
+            val q = args.str("text").trim()
+            if (q.isEmpty()) throw IllegalArgumentException("text is required (non-empty)")
+            val contains = args.boolOr("contains") ?: true
+            val across = args.boolOr("acrossHistory") ?: false
+            val c = coach
+            val hits = if (across && GUIDANCE) {
+                pro.potoki.bekon.agent.ocr.ScreenHistory.findText(q, contains).map {
+                    Triple(it.text, it.pageBounds, it.frameIndex)
+                }
+            } else {
+                val snap = executor.snapshot()
+                snap.items.filter {
+                    if (contains) it.label.contains(q, true) else it.label.equals(q, true)
+                }.map { Triple(it.label, it.bounds ?: intArrayOf(it.x, it.y, it.x, it.y), -1) }
+            }
+            val draw = args.boolOr("draw") ?: true
+            val kind = (args.strOr("mark") ?: "highlight").lowercase()
+            if (draw && hits.isNotEmpty() && c != null) {
+                val (text, b, _) = hits.first()
+                val shapes = when (kind) {
+                    "arrow" -> listOf(
+                        pro.potoki.bekon.agent.coach.Shape(
+                            pro.potoki.bekon.agent.coach.Shape.Kind.ARROW,
+                            b[0].toFloat(), (b[1] - 120).toFloat().coerceAtLeast(0f),
+                            ((b[0] + b[2]) / 2f), b[1].toFloat(),
+                            text.take(40),
+                        ),
+                    )
+                    "mark", "som" -> listOf(
+                        pro.potoki.bekon.agent.coach.Shape(
+                            pro.potoki.bekon.agent.coach.Shape.Kind.MARK,
+                            b[0].toFloat(), b[1].toFloat(), b[2].toFloat(), b[3].toFloat(),
+                            "1",
+                        ),
+                    )
+                    else -> listOf(
+                        pro.potoki.bekon.agent.coach.Shape(
+                            pro.potoki.bekon.agent.coach.Shape.Kind.BOX,
+                            b[0].toFloat(), b[1].toFloat(), b[2].toFloat(), b[3].toFloat(),
+                            text.take(40),
+                        ),
+                    )
+                }
+                val ttl = (args.intOr("ttlMs") ?: 12_000).toLong()
+                if (!c.drawOnScreen(shapes, false, ttl) && GUIDANCE) {
+                    throw CapabilityException("overlay: display-over-other-apps is off")
+                }
+            }
+            val (sw, sh) = try {
+                val s = executor.snapshot(); s.screenW to s.screenH
+            } catch (_: Exception) { 0 to 0 }
+            val hint = if (across && GUIDANCE) {
+                pro.potoki.bekon.agent.ocr.ScreenHistory.scrollHintFor(q, 0, sh)
+            } else null
+            buildJsonObject {
+                put("ok", true); put("count", hits.size)
+                put("hits", buildJsonArray {
+                    hits.take(20).forEach { (text, b, fi) ->
+                        add(buildJsonObject {
+                            put("text", text)
+                            put("bounds", buildJsonArray { b.forEach { add(JsonPrimitive(it)) } })
+                            if (fi >= 0) put("frameIndex", fi)
+                        })
+                    }
+                })
+                hint?.let { put("scrollHint", it) }
+                put("text", when {
+                    hits.isEmpty() -> "no match for '$q'"
+                    hint == "below (swipe up / scroll down to reveal)" -> "found further down — ask the user to scroll down, then find_text again"
+                    hint == "above (swipe down / scroll up to reveal)" -> "found above — ask the user to scroll up"
+                    else -> "highlighted ${hits.size} match(es); user taps"
+                })
+            }
+        }
+        "som_marks" -> {
+            val snap = executor.snapshot()
+            val max = (args.intOr("max") ?: 12).coerceIn(1, 30)
+            val grid = args.boolOr("grid") ?: false
+            val items = snap.items.take(max)
+            val shapes = ArrayList<pro.potoki.bekon.agent.coach.Shape>()
+            if (grid) {
+                shapes += pro.potoki.bekon.agent.coach.Shape(
+                    pro.potoki.bekon.agent.coach.Shape.Kind.GRID,
+                    0f, 0f, snap.screenW.toFloat(), snap.screenH.toFloat(),
+                    (args.intOr("cols") ?: 6).toString(),
+                    0xFF3B82F6.toInt(),
+                )
+            }
+            items.forEachIndexed { i, n ->
+                val b = n.bounds ?: intArrayOf(n.x - 20, n.y - 20, n.x + 20, n.y + 20)
+                shapes += pro.potoki.bekon.agent.coach.Shape(
+                    pro.potoki.bekon.agent.coach.Shape.Kind.MARK,
+                    b[0].toFloat(), b[1].toFloat(), b[2].toFloat(), b[3].toFloat(),
+                    (i + 1).toString(),
+                )
+            }
+            val c = coach ?: throw CapabilityException("coach: not available")
+            val ttl = (args.intOr("ttlMs") ?: 20_000).toLong()
+            if (!c.drawOnScreen(shapes, false, ttl)) {
+                throw CapabilityException(if (GUIDANCE) "overlay: SAW off" else "overlay: Gestures off")
+            }
+            buildJsonObject {
+                put("ok", true); put("count", items.size)
+                put("marks", buildJsonArray {
+                    items.forEachIndexed { i, n ->
+                        add(buildJsonObject { put("n", i + 1); put("ref", n.ref); put("text", n.label); put("x", n.x); put("y", n.y) })
+                    }
+                })
+                put("text", "drew ${items.size} numbered marks; tell the user which number to tap")
+            }
+        }
+        "screen_history" -> {
+            val s = pro.potoki.bekon.agent.ocr.ScreenHistory.snapshot()
+            buildJsonObject {
+                put("frames", s.frames)
+                put("offsetMin", s.offsetMin); put("offsetMax", s.offsetMax)
+                put("fingerprint", s.fingerprint ?: "")
+                put("blockCount", s.blocks.size)
+                put("fullText", s.fullText.take(12_000))
+                put("blocks", buildJsonArray {
+                    s.blocks.take(200).forEach { b ->
+                        add(buildJsonObject {
+                            put("text", b.text)
+                            put("bounds", buildJsonArray { b.pageBounds.forEach { add(JsonPrimitive(it)) } })
+                            put("frameIndex", b.frameIndex)
+                        })
+                    }
+                })
+                put("text", "accumulated ${s.blocks.size} OCR blocks across ${s.frames} frames (in-memory, session only)")
+            }
+        }
+        "full_page_text" -> {
+            val s = pro.potoki.bekon.agent.ocr.ScreenHistory.snapshot()
+            buildJsonObject {
+                put("text", s.fullText.take(20_000))
+                put("frames", s.frames)
+                put("blockCount", s.blocks.size)
+            }
+        }
+        "nav_mark" -> {
+            val label = args.str("label")
+            pro.potoki.bekon.agent.nav.NavJournal.mark(label, args.strOr("fingerprint"))
+            buildJsonObject { put("ok", true); put("text", "marked screen as '$label'"); put("fingerprint", pro.potoki.bekon.agent.nav.NavJournal.currentFingerprint() ?: "") }
+        }
+        "nav_history" -> {
+            val st = pro.potoki.bekon.agent.nav.NavJournal.state(args.intOr("limit") ?: 30)
+            buildJsonObject {
+                put("fingerprint", st.fingerprint ?: "")
+                put("label", st.label ?: "")
+                put("screen_changed", st.changed)
+                put("steps", buildJsonArray {
+                    st.steps.forEach { s ->
+                        add(buildJsonObject {
+                            put("atMs", s.atMs); put("fingerprint", s.fingerprint)
+                            put("screen_changed", s.screenChanged)
+                            s.label?.let { put("label", it) }
+                            s.hintSummary?.let { put("hint", it) }
+                            s.a11yWindow?.let { put("window", it) }
+                        })
+                    }
+                })
+            }
+        }
+        "current_screen_fingerprint" -> buildJsonObject {
+            val st = pro.potoki.bekon.agent.nav.NavJournal.state(1)
+            put("fingerprint", st.fingerprint ?: "")
+            put("label", st.label ?: "")
+            put("screen_changed", st.changed)
+        }
+        "guidance_step" -> {
+            val text = args.strOr("text") ?: ""
+            val step = args.intOr("step")
+            val total = args.intOr("total")
+            val st = when ((args.strOr("state") ?: "waiting").lowercase()) {
+                "working" -> pro.potoki.bekon.agent.status.AgentStatus.State.WORKING
+                "done" -> pro.potoki.bekon.agent.status.AgentStatus.State.DONE
+                "error" -> pro.potoki.bekon.agent.status.AgentStatus.State.ERROR
+                else -> pro.potoki.bekon.agent.status.AgentStatus.State.WAITING
+            }
+            if (text.isNotBlank()) {
+                val req = pro.potoki.bekon.agent.status.AgentStatus.parse(text, st.wire, args.intOr("ttlMs")?.toLong(), false, "top", step, total)
+                pro.potoki.bekon.agent.status.AgentStatus.apply(req)
+            }
+            buildJsonObject {
+                put("ok", true)
+                put("text", "guidance step set — wait for userEvents next_step (pill Next) or wait_for_change")
+                put("hint", "Do not tap for the user. Draw a mark, then wait.")
+            }
         }
         "tap" -> buildJsonObject { put("ok", executor.tap(args.int("x"), args.int("y"))) }
         "swipe" -> {
@@ -939,6 +1181,68 @@ class McpHandler(
             },
         )
         tool("shortcut_open", "Open a saved shortcut by id. An app launches on the phone. A url opens in the browser. A script runs its rules on the phone and waits up to waitMs (default 20s) for done; then use wait_for_script if still running.", schema { str("id"); int("waitMs", required = false) })
+
+        tool(
+            "ocr_screen",
+            "Guidance/OCR: run on-device text recognition on the current screenshot and return text blocks with screen-space bounds and refs (e1..). Does not tap. Prefer this over accessibility snapshot in guidance mode.",
+            schema(),
+        )
+        tool(
+            "find_text",
+            "Find on-screen text (OCR or current snapshot) and optionally draw a highlight/arrow/mark on the first hit. acrossHistory=true searches the in-memory scroll-accumulated OCR store and may return scrollHint (further down/above). User taps; Bekon never taps.",
+            schema {
+                str("text")
+                add("contains", buildJsonObject { put("type", "boolean") }, false)
+                add("acrossHistory", buildJsonObject { put("type", "boolean") }, false)
+                add("draw", buildJsonObject { put("type", "boolean") }, false)
+                str("mark", enum = listOf("highlight", "arrow", "mark"), required = false)
+                int("ttlMs", required = false)
+            },
+        )
+        tool(
+            "som_marks",
+            "Draw numbered Set-of-Marks badges on OCR/snapshot elements (and optional coordinate grid). Tell the human which number to tap. Guidance-friendly.",
+            schema {
+                int("max", required = false)
+                add("grid", buildJsonObject { put("type", "boolean") }, false)
+                int("cols", required = false)
+                int("ttlMs", required = false)
+            },
+        )
+        tool(
+            "screen_history",
+            "In-memory scroll-aware OCR accumulation for this session (guidance). Returns deduplicated blocks with page-space bounds, frame count, fullText. Cleared on session stop / page change. Not stored on disk.",
+            schema(),
+        )
+        tool(
+            "full_page_text",
+            "Plain text of the accumulated scroll OCR history (session memory only).",
+            schema(),
+        )
+        tool(
+            "nav_mark",
+            "Label the current screen in the in-memory navigation journal (breadcrumb). Optional fingerprint override.",
+            schema { str("label"); str("fingerprint", required = false) },
+        )
+        tool(
+            "nav_history",
+            "In-memory navigation journal: fingerprints, agent labels, last hints. Full flavor may include a11y window keys.",
+            schema { int("limit", required = false) },
+        )
+        tool(
+            "current_screen_fingerprint",
+            "Current OCR-based screen fingerprint (and optional agent label).",
+            schema(),
+        )
+        tool(
+            "guidance_step",
+            "Set the status pill for a guided step (waiting/working/done) with optional step/total. Then wait for userEvents next_step or wait_for_change. Never tap for the user.",
+            schema {
+                str("text", required = false)
+                str("state", enum = listOf("waiting", "working", "done", "error"), required = false)
+                int("step", required = false); int("total", required = false); int("ttlMs", required = false)
+            },
+        )
         tool("shortcut_remove", "Delete a saved shortcut by id.", schema { str("id") })
     }
 

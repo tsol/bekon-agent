@@ -71,9 +71,14 @@ fun SetupWizard(state: HomeState, agents: List<String>, tick: Int, onIntent: (Ho
     val guide = remember { DeviceSetupGuide(ctx, projectionActive = { state.captureGranted }) }
     val conn by pro.potoki.bekon.agent.access.AgentConnections.state.collectAsState()
     val notifOk = remember(tick) { androidx.core.app.NotificationManagerCompat.from(ctx).areNotificationsEnabled() }
-    val a11yOk = state.gesturesOn || pro.potoki.bekon.agent.device.touch.TouchService.isBound()
-    val restrictedNeeded = remember(tick, a11yOk) {
-        !a11yOk && android.os.Build.VERSION.SDK_INT >= 33 && try { guide.status("restricted_settings") == false } catch (_: Exception) { false }
+    val guidance = pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE
+    val a11yOk = if (guidance) {
+        pro.potoki.bekon.agent.overlay.OverlayHost.canDraw(ctx)
+    } else {
+        state.gesturesOn || pro.potoki.bekon.agent.device.touch.TouchService.isBound()
+    }
+    val restrictedNeeded = remember(tick, a11yOk, guidance) {
+        !guidance && !a11yOk && android.os.Build.VERSION.SDK_INT >= 33 && try { guide.status("restricted_settings") == false } catch (_: Exception) { false }
     }
     val sessionOk = state.isRunning && !state.publicUrl.isNullOrBlank() && state.captureGranted
     val core = buildList {
@@ -218,7 +223,12 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
             if (current == CoreStep.A11Y || current == CoreStep.RESTRICTED) {
                 val g = remember { DeviceSetupGuide(ctx, projectionActive = { state.captureGranted }) }
                 val oem = remember { guideOem(g) }
-                IllustratedGuide(if (current == CoreStep.RESTRICTED) restrictedSteps(oem) else a11ySteps(oem))
+                if (!pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) {
+                    IllustratedGuide(if (current == CoreStep.RESTRICTED) restrictedSteps(oem) else a11ySteps(oem))
+                } else if (current == CoreStep.A11Y) {
+                    Text(pro.potoki.bekon.agent.overlay.OverlayHost.oemOverlayHint(LocalContext.current), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.guidance_disclosure_body), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                }
             }
             val btn = if (current == CoreStep.A11Y || current == CoreStep.RESTRICTED) R.string.g_open_settings else verb
             if (busy) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -244,7 +254,14 @@ private fun StepCard(current: CoreStep, state: HomeState, onIntent: (HomeIntent)
                             ctx.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                 android.net.Uri.parse("package:${ctx.packageName}")))
                         }
-                        CoreStep.A11Y -> { hint(hA11y); pro.potoki.bekon.agent.consent.Consent.openAccessibilitySettings(ctx) }
+                        CoreStep.A11Y -> {
+                            if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) {
+                                hint(ctx.getString(R.string.core_hint_overlay))
+                                pro.potoki.bekon.agent.overlay.OverlayHost.openOverlaySettings(ctx)
+                            } else {
+                                hint(hA11y); pro.potoki.bekon.agent.consent.Consent.openAccessibilitySettings(ctx)
+                            }
+                        }
                         CoreStep.READY -> {}
                     }
                 },
@@ -294,13 +311,15 @@ private fun GuideFallback(url: String?) {
 
 private fun coreTitle(c: CoreStep) = when (c) {
     CoreStep.SESSION -> R.string.core_step_session; CoreStep.NOTIFICATIONS -> R.string.core_step_notifications
-    CoreStep.RESTRICTED -> R.string.core_step_restricted; CoreStep.A11Y -> R.string.core_step_a11y
+    CoreStep.RESTRICTED -> R.string.core_step_restricted
+    CoreStep.A11Y -> if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) R.string.core_step_overlay else R.string.core_step_a11y
     CoreStep.READY -> R.string.core_ready_title
 }
 
 private fun coreSentence(c: CoreStep) = when (c) {
     CoreStep.SESSION -> R.string.step1_session; CoreStep.NOTIFICATIONS -> R.string.step1_notifications
-    CoreStep.RESTRICTED -> R.string.step1_restricted; CoreStep.A11Y -> R.string.step1_a11y
+    CoreStep.RESTRICTED -> R.string.step1_restricted
+    CoreStep.A11Y -> if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) R.string.core_hint_overlay else R.string.step1_a11y
     CoreStep.READY -> R.string.core_ready_title
 }
 

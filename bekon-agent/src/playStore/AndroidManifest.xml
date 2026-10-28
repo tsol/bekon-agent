@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Guidance mode (Play): no AccessibilityService, no IME. Overlays use SYSTEM_ALERT_WINDOW. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <application>
+        <!-- Remove AccessibilityService entirely from the Play package. -->
+        <service
+            android:name=".device.touch.TouchService"
+            tools:node="remove" />
+
+        <!-- A11y prominent disclosure is unused without Gestures; keep PrivacyPolicy. -->
+        <activity
+            android:name=".consent.DisclosureActivity"
+            tools:node="remove" />
+    </application>
+</manifest>

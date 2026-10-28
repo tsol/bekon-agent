@@ -39,5 +39,5 @@ object UserEvents {
     const val DOC = "userEvents come from the human tapping the status pill menu: back_to_app (they went back to Bekon), " +
         "changed_mind (they cancelled the current step: hints were cleared, do not redraw the same hint; ask or pick another way), " +
         "new_goal (text = their new instruction: follow it instead), cancel_all (they stopped coaching and paused the session: stop, " +
-        "agent_status done/clear, do not call action tools until they resume)."
+        "agent_status done/clear, do not call action tools until they resume), next_step (guidance mode: they tapped Next after following a hint)."
 }

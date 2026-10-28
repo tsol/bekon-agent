@@ -27,6 +27,13 @@ class PillMenuActivity : Activity() {
             setOnClickListener { onClick() }
             col.addView(this, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = (8 * d).toInt() })
         }
+        if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) {
+            big(R.string.pill_next_step) {
+                clearHints()
+                UserEvents.add("next_step")
+                finish()
+            }
+        }
         big(R.string.pill_back_to_app) {
             UserEvents.add("back_to_app")
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))

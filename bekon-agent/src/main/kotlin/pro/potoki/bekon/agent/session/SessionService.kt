@@ -331,6 +331,7 @@ class SessionService : Service() {
         gate?.reset()
         Log.i(TAG, "stopSession")
         try { pro.potoki.bekon.agent.status.UserEvents.stopCoaching?.invoke() } catch (_: Exception) {}
+        stopGuidanceExtras()
         try { executor?.releaseCapture() } catch (_: Exception) {}
         supervisor?.stop()
         supervisor = null
@@ -347,9 +348,13 @@ class SessionService : Service() {
         _state.value = _state.value.copy(
             active = true,
             captureGranted = ex.health()["capture"] ?: false,
-            gesturesOn = TouchService.isBound(),
-            keyboardOn = BekonImeService.isEnabled(contentResolver),
-            keyboardSelected = BekonImeService.isSelected(contentResolver),
+            gesturesOn = if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
+                pro.potoki.bekon.agent.overlay.OverlayHost.canDraw(this)
+            else TouchService.isBound(),
+            keyboardOn = if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) false
+                else BekonImeService.isEnabled(contentResolver),
+            keyboardSelected = if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) false
+                else BekonImeService.isSelected(contentResolver),
         )
         reconcileSteps()
         updateNotification(statusText())
@@ -394,6 +399,7 @@ class SessionService : Service() {
                 ex.onCapturePermission(data, resultCode)
                 _state.value = _state.value.copy(captureGranted = true)
                 updateNotification("Capture granted")
+                startGuidanceExtras(ex)
             } catch (e: Exception) {
                 Log.e(TAG, "capture grant failed", e)
                 _state.value = _state.value.copy(error = "capture: " + (e.message ?: ""))
@@ -430,7 +436,11 @@ class SessionService : Service() {
         },
         SetupStep.BATTERY to { isEmptyBatteryOptimizations() },
         SetupStep.SCREEN to { _state.value.captureGranted },
-        SetupStep.GESTURES to { TouchService.isBound() },
+        SetupStep.GESTURES to {
+            if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
+                pro.potoki.bekon.agent.overlay.OverlayHost.canDraw(this)
+            else TouchService.isBound()
+        },
         // Optional: typing works through accessibility SET_TEXT; never block onboarding on the IME.
         SetupStep.KEYBOARD to { true },
         SetupStep.STARTING to { _state.value.isRunning },
@@ -475,17 +485,60 @@ class SessionService : Service() {
         val step = _state.value.currentStep
         val capture = _state.value.captureGranted
         val tunnelUp = tunnel?.isAlive() ?: false
-        val gesturesOn = TouchService.isBound()
+        val gesturesOn = if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
+            pro.potoki.bekon.agent.overlay.OverlayHost.canDraw(this)
+        else TouchService.isBound()
         // Coach only when capture (or tunnel) is up and something is still off.
         val callable = capture || tunnelUp
         if (!callable || step == SetupStep.DONE || step == SetupStep.COACH) return
         if (gesturesOn) {
-            // Path 1: overlay. We don't have a real bbox here without an a11y snapshot;
-            // the deep-link CTA + label on the banner guides the user.
-            pro.potoki.bekon.agent.device.touch.GestureOverlay.showCoach(null, step.body)
+            if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) {
+                pro.potoki.bekon.agent.coach.CoachOverlay.bindAppContext(this)
+                val dm = resources.displayMetrics
+                val shapes = listOf(
+                    pro.potoki.bekon.agent.coach.Shape(
+                        pro.potoki.bekon.agent.coach.Shape.Kind.TEXT,
+                        dm.widthPixels * 0.1f, dm.heightPixels * 0.15f,
+                        dm.widthPixels * 0.1f, dm.heightPixels * 0.15f,
+                        step.body.take(60),
+                    ),
+                )
+                pro.potoki.bekon.agent.coach.CoachOverlay.show(null, shapes, false, 8_000)
+            } else {
+                // Path 1: overlay. We don't have a real bbox here without an a11y snapshot;
+                // the deep-link CTA + label on the banner guides the user.
+                pro.potoki.bekon.agent.device.touch.GestureOverlay.showCoach(null, step.body)
+            }
         }
         // Path 2/3 handled on the wire: the MCP/HTTP client reads /coach/hint.
         Log.i(TAG, "coach hint for ${step.name}: ${step.body}")
+    }
+
+
+    private fun startGuidanceExtras(ex: DeviceExecutor) {
+        if (!pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) return
+        try {
+            pro.potoki.bekon.agent.coach.CoachOverlay.bindAppContext(this)
+            if (pro.potoki.bekon.agent.overlay.OverlayHost.canDraw(this)) {
+                pro.potoki.bekon.agent.device.touch.StatusPill.attach(this)
+                pro.potoki.bekon.agent.device.touch.StatusPill.refresh()
+            }
+            pro.potoki.bekon.agent.ocr.GuidanceSampler.start(
+                scope = scope,
+                latestBitmap = { ex.latestCaptureBitmap() },
+                screenSize = { ex.screenSizeNow() },
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "startGuidanceExtras: ${e.message}")
+        }
+    }
+
+    private fun stopGuidanceExtras() {
+        try { pro.potoki.bekon.agent.ocr.GuidanceSampler.stop() } catch (_: Exception) {}
+        try { pro.potoki.bekon.agent.coach.CoachOverlay.clear() } catch (_: Exception) {}
+        try { pro.potoki.bekon.agent.device.touch.StatusPill.detach() } catch (_: Exception) {}
+        try { pro.potoki.bekon.agent.nav.NavJournal.clear() } catch (_: Exception) {}
+        try { pro.potoki.bekon.agent.ocr.ScreenHistory.clear() } catch (_: Exception) {}
     }
 
     private fun fail(msg: String) {
@@ -502,6 +555,7 @@ class SessionService : Service() {
         try { tunnel?.stop() } catch (e: Exception) { Log.w(TAG, "tunnel stop ${e.message}") }
         try { server?.stop() } catch (e: Exception) { Log.w(TAG, "server stop ${e.message}") }
         pro.potoki.bekon.agent.device.capture.ScreenCapture.onSystemStop = null
+        stopGuidanceExtras()
         try { executor?.releaseCapture() } catch (_: Exception) {}
         scope.cancel()
         pro.potoki.bekon.agent.status.AgentStatus.clear()

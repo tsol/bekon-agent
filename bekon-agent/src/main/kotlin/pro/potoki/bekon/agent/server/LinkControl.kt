@@ -84,6 +84,9 @@ class LinkControl(
             path.matches(Regex("""^/s/[^/]+/shot\.jpe?g$""")) -> return shot(path.split('/')[2])
             path.matches(Regex("""^/s/[^/]+/status/?$""")) -> return setStatus(path.split('/')[2], query["text"], done = false)
             path.matches(Regex("""^/s/[^/]+/done/?$""")) -> return setStatus(path.split('/')[2], query["text"], done = true)
+            path.matches(Regex("""^/s/[^/]+/nav_history/?$""")) -> return navHistoryPage(path.split('/')[2], query["limit"]?.toIntOrNull() ?: 30)
+            path.matches(Regex("""^/s/[^/]+/fingerprint/?$""")) -> return fingerprintPage(path.split('/')[2])
+            path.matches(Regex("""^/s/[^/]+/current_screen_fingerprint/?$""")) -> return fingerprintPage(path.split('/')[2])
             path.matches(Regex("""^/s/[^/]+/do/[^/]+/?$""")) -> {
                 val parts = path.trimEnd('/').split('/')
                 return doAction(parts[2], parts[4], query)
@@ -182,7 +185,7 @@ class LinkControl(
                 val fg = executor.foreground()
                 val pkg = fg["package"] ?: "?"
                 val title = fg["title"] ?: fg["activity"] ?: ""
-                val ro = readOnly()
+                val ro = readOnly() || pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE
                 pruneNonces()
                 val base = abs("/s/$token")
                 val shotUrl = "$base/shot.jpg?v=$snapId"
@@ -195,7 +198,12 @@ class LinkControl(
                 sb.append("<p>App: <code>${esc(pkg)}</code>")
                 if (title.isNotBlank()) sb.append(" — ${esc(title)}")
                 sb.append(" · ${items.size} elements</p>\n")
-                if (ro) sb.append("<p><b>Read-only:</b> viewing + coach highlights only (no taps/typing).</p>\n")
+                if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) {
+                    sb.append("<p><b>Guidance mode:</b> coach highlights only — you tap.</p>\n")
+                    sb.append("<p>Nav journal: ").append(a("$base/nav_history", "nav_history"))
+                    sb.append(" · ").append(a("$base/fingerprint", "current_screen_fingerprint")).append("</p>\n")
+                }
+                else if (ro) sb.append("<p><b>Read-only:</b> viewing + coach highlights only (no taps/typing).</p>\n")
                 // Screenshot first (absolute URL + cache-bust). Harmless JS refreshes img for humans; page works without JS.
                 sb.append("<p><img id=\"shot\" src=\"${esc(shotUrl)}\" alt=\"screenshot\" style=\"max-width:100%;height:auto;border:1px solid #ccc\"></p>\n")
                 sb.append("<p>")
@@ -292,7 +300,7 @@ class LinkControl(
     private fun appsPage(token: String): Page {
         if (auth(token) == null) return html(401, "Invalid or expired session.")
         val list = try { apps?.list().orEmpty() } catch (_: Exception) { emptyList() }
-        val ro = readOnly()
+        val ro = readOnly() || pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE
         val base = abs("/s/$token")
         val sb = StringBuilder()
         sb.append("<!doctype html><html><head><meta charset=utf-8><title>Apps</title></head><body>\n")
@@ -334,6 +342,9 @@ class LinkControl(
         val act = n.act
         // Coach is allowed in read-only; writes are not.
         val isCoach = act is Act.Highlight || act is Act.Arrow || act is Act.Hint || act is Act.Clear
+        if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE && !isCoach) {
+            return screen(token, note = "guidance_mode: coach highlights only — the user performs every tap")
+        }
         if (!isCoach && readOnly()) return screen(token, note = "Read-only: action ignored.")
         if (gate?.isPaused() == true) return html(403, esc(ClientGate.PAUSED))
         return try {
@@ -493,6 +504,7 @@ class LinkControl(
     private fun openUrl(token: String, raw: String): Page {
         if (auth(token) == null) return html(401, "Invalid or expired session.")
         if (gate?.isPaused() == true) return html(403, esc(ClientGate.PAUSED))
+        if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) return screen(token, note = "guidance_mode: open url from link disabled — coach only")
         if (readOnly()) return screen(token, note = "Read-only: open url ignored.")
         val url = raw.trim()
         val uri = try { java.net.URI(url) } catch (_: Exception) { null }
@@ -712,6 +724,52 @@ class LinkControl(
     private fun a(href: String, label: String) = "<a href=\"${esc(href)}\">${esc(label)}</a>"
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
     private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
+    /** Link-mode: in-memory OCR nav breadcrumb (guidance). Same data as MCP nav_history. */
+    private fun navHistoryPage(token: String, limit: Int): Page {
+        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start?client=…")
+        val st = pro.potoki.bekon.agent.nav.NavJournal.state(limit)
+        val base = abs("/s/$token")
+        val sb = StringBuilder()
+        sb.append("<!doctype html><html><head><meta charset=utf-8><title>nav_history</title></head><body>\n")
+        sb.append("<h1>nav_history</h1>\n")
+        sb.append("<p>").append(a("$base/screen", "Back to screen"))
+        sb.append(" · ").append(a("$base/fingerprint", "current_screen_fingerprint")).append("</p>\n")
+        sb.append("<p>fingerprint: <code>").append(esc(st.fingerprint ?: "")).append("</code></p>\n")
+        sb.append("<p>label: <code>").append(esc(st.label ?: "")).append("</code></p>\n")
+        sb.append("<p>screen_changed: <b>").append(st.changed).append("</b></p>\n")
+        sb.append("<h2>steps</h2><ol>\n")
+        for (s in st.steps) {
+            sb.append("<li>")
+            sb.append("atMs=").append(s.atMs)
+            sb.append(" screen_changed=").append(s.screenChanged)
+            sb.append(" fp=<code>").append(esc(s.fingerprint.take(120))).append("</code>")
+            s.label?.let { sb.append(" label=<code>").append(esc(it)).append("</code>") }
+            s.hintSummary?.let { sb.append(" hint=<code>").append(esc(it)).append("</code>") }
+            s.a11yWindow?.let { sb.append(" window=<code>").append(esc(it)).append("</code>") }
+            sb.append("</li>\n")
+        }
+        sb.append("</ol></body></html>")
+        return Page(200, sb.toString())
+    }
+
+    /** Link-mode: current OCR screen fingerprint (guidance). Same as MCP current_screen_fingerprint. */
+    private fun fingerprintPage(token: String): Page {
+        if (auth(token) == null) return html(401, "Invalid or expired session. Start again at /link/start?client=…")
+        val st = pro.potoki.bekon.agent.nav.NavJournal.state(1)
+        val base = abs("/s/$token")
+        val sb = StringBuilder()
+        sb.append("<!doctype html><html><head><meta charset=utf-8><title>current_screen_fingerprint</title></head><body>\n")
+        sb.append("<h1>current_screen_fingerprint</h1>\n")
+        sb.append("<p>").append(a("$base/screen", "Back to screen"))
+        sb.append(" · ").append(a("$base/nav_history", "nav_history")).append("</p>\n")
+        sb.append("<p>fingerprint: <code>").append(esc(st.fingerprint ?: "")).append("</code></p>\n")
+        sb.append("<p>label: <code>").append(esc(st.label ?: "")).append("</code></p>\n")
+        sb.append("<p>screen_changed: <b>").append(st.changed).append("</b></p>\n")
+        sb.append("</body></html>")
+        return Page(200, sb.toString())
+    }
+
     private fun html(code: Int, body: String) = Page(code, "<!doctype html><html><head><meta charset=utf-8></head><body>$body</body></html>")
     companion object {
         const val PAGE_SIZE = 200

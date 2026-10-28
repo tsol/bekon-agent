@@ -3,4 +3,16 @@
     <string name="app_name">Bekon Agent</string>
     <string name="accessibility_service_description">Bekon remote assistance: lets the agent you connected read all on-screen text (including card numbers, codes and personal data) and perform taps, swipes and typing for you — even when screen capture is off. Data goes only to the agent you approve on this phone. Not an accessibility tool for disabilities.</string>
     <string name="ime_name">Bekon Keys</string>
+    <string name="cap_guidance">guidance · you tap</string>
+    <string name="cap_guidance_no_overlay">guidance · allow overlay to show hints</string>
+    <string name="pill_next_step">Next step</string>
+    <string name="core_hint_overlay">Allow Bekon to display over other apps so it can draw hints on your screen. You still tap everything yourself.</string>
+    <string name="overlay_hint_generic">Settings → Apps → Bekon → Display over other apps → Allow.</string>
+    <string name="overlay_hint_xiaomi">Xiaomi/MIUI: Settings → Apps → Manage apps → Bekon → Other permissions → Display pop-up windows / Display over other apps → Allow. Also check Battery saver is not restricting Bekon.</string>
+    <string name="overlay_hint_samsung">Samsung: Settings → Apps → Bekon → Appear on top (or Display over other apps) → Allow.</string>
+    <string name="guidance_disclosure_title">Guidance mode</string>
+    <string name="guidance_disclosure_body">Bekon sees your screen (with your consent) and can recognize on-screen text to draw hints, arrows and numbered marks. While you scroll, it remembers text from this session in memory only (cleared when you stop). Bekon never taps or types for you — you perform every action. Stop anytime from the notification or the status pill.</string>
+    <string name="core_step_overlay">Allow on-screen hints</string>
+    <string name="dot_overlay_on">Hints: overlay allowed</string>
+    <string name="dot_overlay_off">Hints: allow display over apps</string>
 </resources>

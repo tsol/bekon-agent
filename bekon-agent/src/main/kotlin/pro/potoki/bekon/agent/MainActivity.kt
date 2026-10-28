@@ -72,6 +72,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import pro.potoki.bekon.agent.R
 import pro.potoki.bekon.agent.BuildConfig
+import pro.potoki.bekon.agent.overlay.OverlayHost
 import pro.potoki.bekon.agent.access.PrefsTrustedClients
 import pro.potoki.bekon.agent.consent.Consent
 import pro.potoki.bekon.agent.device.ime.BekonImeService
@@ -232,13 +233,18 @@ fun BekonHome(state: HomeState, tick: Int = 0, onIntent: (HomeIntent) -> Unit) {
         val ctx = androidx.compose.ui.platform.LocalContext.current
         // Pinned to the bottom, just above the bottom bar; small and muted. Hidden while a setup step is shown
         // (the same links are in Settings), so the step card never slides under them.
-        val setupDone = state.isRunning && state.captureGranted && (state.gesturesOn || TouchService.isBound())
+        val setupDone = state.isRunning && state.captureGranted && (
+            if (BuildConfig.GUIDANCE_MODE) state.gesturesOn || OverlayHost.canDraw(ctx)
+            else state.gesturesOn || TouchService.isBound()
+        )
         if (setupDone) Column(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FooterLink(stringResource(R.string.home_a11y_disclosure)) { Consent.showDisclosure(ctx, Consent.Kind.A11Y) }
+            if (!BuildConfig.GUIDANCE_MODE) {
+                FooterLink(stringResource(R.string.home_a11y_disclosure)) { Consent.showDisclosure(ctx, Consent.Kind.A11Y) }
+            }
             FooterLink(stringResource(R.string.home_privacy)) { Consent.openPrivacyPolicy(ctx) }
             FooterLink(stringResource(R.string.audit_ask)) { pro.potoki.bekon.agent.ui.SourceCode.askAgentToAudit(ctx) }
         }

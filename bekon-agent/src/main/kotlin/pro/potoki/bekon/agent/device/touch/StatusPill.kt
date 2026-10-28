@@ -1,6 +1,5 @@
 package pro.potoki.bekon.agent.device.touch
 
-import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
@@ -34,7 +33,7 @@ import pro.potoki.bekon.agent.status.AgentStatus.State as StatusState
  */
 object StatusPill {
     private val main = Handler(Looper.getMainLooper())
-    private var host: AccessibilityService? = null
+    private var host: Context? = null
     private var wm: WindowManager? = null
     private var view: PillView? = null
     private var params: WindowManager.LayoutParams? = null
@@ -48,8 +47,8 @@ object StatusPill {
         override fun run() { refresh(); main.postDelayed(this, 2000) }
     }
 
-    fun attach(svc: AccessibilityService) {
-        host = svc
+    fun attach(ctx: Context) {
+        host = ctx.applicationContext
         jobs.forEach { it.cancel() }; jobs.clear()
         jobs.add(scope.launch { AgentStatus.current.collect { st ->
             if (st !== lastStatus && st != null) dismissed = false
@@ -91,15 +90,24 @@ object StatusPill {
     fun relayout() = main.post { relayoutNow() }
 
     private fun ownForeground(): Boolean = try {
-        val pkg = TouchService.active?.rootInActiveWindow?.packageName?.toString()
-        pkg != null && pkg == host?.packageName
+        if (pro.potoki.bekon.agent.overlay.OverlayHost.guidance) {
+            // No a11y: treat Bekon activities via running process importance is heavy; skip — pill hides when menu open.
+            false
+        } else {
+            val pkg = TouchService.active?.rootInActiveWindow?.packageName?.toString()
+            pkg != null && pkg == host?.packageName
+        }
     } catch (_: Exception) { false }
 
     /** Keyboard window, if shown: the pill must stay above it and inside the screen. */
-    private fun imeRect(): Rect? = try {
-        host?.windows?.firstOrNull { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-            ?.let { w -> Rect().also { w.getBoundsInScreen(it) } }?.takeIf { !it.isEmpty }
-    } catch (_: Exception) { null }
+    private fun imeRect(): Rect? {
+        if (pro.potoki.bekon.agent.overlay.OverlayHost.guidance) return null
+        val svc = TouchService.active ?: return null
+        return try {
+            svc.windows?.firstOrNull { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                ?.let { w -> Rect().also { w.getBoundsInScreen(it) } }?.takeIf { !it.isEmpty }
+        } catch (_: Exception) { null }
+    }
 
     private fun remove() {
         val v = view ?: return
@@ -112,17 +120,8 @@ object StatusPill {
         return try {
             val w = svc.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val v = PillView(svc)
-            val p = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                PixelFormat.TRANSLUCENT,
-            )
+            val p = pro.potoki.bekon.agent.overlay.OverlayHost.touchableWrapParams()
             p.gravity = Gravity.TOP or Gravity.START
-            if (Build.VERSION.SDK_INT >= 28) p.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             w.addView(v, p)
             wm = w; view = v; params = p
             v
@@ -150,6 +149,7 @@ object StatusPill {
 
     /** Clickable app nodes (not ours, not SystemUI) — covering fewer of them is better. */
     private fun clickables(): List<Rect> {
+        if (pro.potoki.bekon.agent.overlay.OverlayHost.guidance) return emptyList()
         val root = try { TouchService.active?.rootInActiveWindow } catch (_: Exception) { null } ?: return emptyList()
         val own = host?.packageName
         if (root.packageName?.toString() == own) return emptyList()

@@ -24,14 +24,14 @@ data class Shape(
     val label: String? = null,
     val color: Int = DEFAULT_COLOR,
 ) {
-    enum class Kind { BOX, CIRCLE, ARROW, UNDERLINE, TEXT }
+    enum class Kind { BOX, CIRCLE, ARROW, UNDERLINE, TEXT, MARK, GRID }
     companion object {
         const val DEFAULT_COLOR = 0xFFFF2D55.toInt() // marker red-pink
     }
 }
 
 object Sketch {
-    val KINDS = listOf("box", "circle", "arrow", "underline", "text")
+    val KINDS = listOf("box", "circle", "arrow", "underline", "text", "mark", "grid")
 
     private val NAMED = mapOf(
         "red" to 0xFFFF2D55.toInt(), "green" to 0xFF22C55E.toInt(), "blue" to 0xFF3B82F6.toInt(),
@@ -91,6 +91,19 @@ object Sketch {
             "text", "label" -> {
                 val x = need("x"); val y = need("y")
                 Shape(Shape.Kind.TEXT, x, y, x, y, label ?: throw IllegalArgumentException("shapes[$i] text needs label"), color)
+            }
+            "mark", "som" -> {
+                // Numbered Set-of-Marks badge at centre (x,y) or bounds centre; label = number/text
+                if (b != null) Shape(Shape.Kind.MARK, b[0], b[1], b[2], b[3], label ?: "?", color)
+                else {
+                    val x = need("x"); val y = need("y"); val r = o.f("r") ?: 28f
+                    Shape(Shape.Kind.MARK, x - r, y - r, x + r, y + r, label ?: "?", color)
+                }
+            }
+            "grid" -> {
+                // Optional coordinate grid over the screen (or bounds). label unused; color = line color.
+                if (b != null) Shape(Shape.Kind.GRID, b[0], b[1], b[2], b[3], label, color)
+                else Shape(Shape.Kind.GRID, 0f, 0f, need("w"), need("h"), label, color)
             }
             else -> throw IllegalArgumentException("shapes[$i]: unknown type '$type' (use ${KINDS.joinToString()})")
         }
@@ -158,6 +171,8 @@ object Sketch {
     fun labelAnchor(s: Shape): Pair<Float, Float> = when (s.kind) {
         Shape.Kind.ARROW -> s.x1 to s.y1
         Shape.Kind.TEXT -> s.x1 to s.y1
+        Shape.Kind.MARK -> ((s.x1 + s.x2) / 2) to ((s.y1 + s.y2) / 2)
+        Shape.Kind.GRID -> s.x1 to s.y1
         Shape.Kind.UNDERLINE -> min(s.x1, s.x2) to (max(s.y1, s.y2) + 24)
         else -> min(s.x1, s.x2) to (max(s.y1, s.y2) + 28)
     }
@@ -173,6 +188,8 @@ object Sketch {
                 wobblyLine(s.x1 + 6, s.y1 + 9, s.x2 - 4, s.y2 + 7, rnd),
             )
             Shape.Kind.TEXT -> emptyList()
+            Shape.Kind.MARK -> emptyList() // filled badge drawn in SketchPainter
+            Shape.Kind.GRID -> emptyList()
         }
     }
 }

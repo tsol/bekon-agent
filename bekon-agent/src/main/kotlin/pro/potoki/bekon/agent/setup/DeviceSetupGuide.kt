@@ -63,10 +63,11 @@ class DeviceSetupGuide(
     fun steps(): List<JsonObject> {
         val common = data["common"]!!.jsonArray.map { it.jsonObject }
         val v = vendor()?.get("steps")?.jsonArray?.map { it.jsonObject } ?: emptyList()
-        // Order: restricted settings, accessibility, notifications, vendor steps, generic battery, projection.
-        val head = common.filter { it.s("req") in setOf("restricted_settings", "accessibility", "notifications") }
+        val guidance = pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE
+        // Guidance (Play): no Accessibility — only notifications + projection (+ vendor/battery). Overlay is a separate UI step.
+        val headReqs = if (guidance) setOf("notifications") else setOf("restricted_settings", "accessibility", "notifications")
+        val head = common.filter { it.s("req") in headReqs }
         val tail = common.filter { it.s("req") in setOf("battery", "projection") }
-        // Battery steps (generic Unrestricted, Samsung sleeping apps, MIUI battery saver) are optional and go last.
         val (vBattery, vOther) = v.partition { isOptional(it) }
         return (head + vOther + tail.filter { !isOptional(it) } + vBattery + tail.filter { isOptional(it) }).filter(::applies)
     }
@@ -141,6 +142,9 @@ class DeviceSetupGuide(
         val st = steps().firstOrNull { it.s("id") == stepId }
             ?: data["common"]!!.jsonArray.map { it.jsonObject }.firstOrNull { it.s("id") == stepId }
             ?: throw IllegalArgumentException("unknown step $stepId; see device_setup_guide")
+        if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE && st.s("req") == "accessibility") {
+            return "guidance_mode: Accessibility is not used; grant display-over-other-apps for hints instead"
+        }
         if (st.s("req") == "accessibility" &&
             !pro.potoki.bekon.agent.consent.Consent.accepted(ctx, pro.potoki.bekon.agent.consent.Consent.Kind.A11Y)
         ) {

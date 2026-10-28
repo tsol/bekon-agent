@@ -45,4 +45,16 @@
     <string name="access_replace_message">Заменить агента «%1$s» на «%2$s»? Одновременно может быть подключён только один агент.</string>
     <string name="notif_ready_title">Bekon готов к подключению агента</string>
     <string name="pill_stop_session">Остановить сеанс</string>
+    <string name="cap_guidance">подсказки · вы нажимаете</string>
+    <string name="cap_guidance_no_overlay">подсказки · разрешите оверлей</string>
+    <string name="pill_next_step">Далее</string>
+    <string name="core_hint_overlay">Разрешите Bekon показывать поверх других приложений, чтобы рисовать подсказки на экране. Все нажатия делаете вы.</string>
+    <string name="overlay_hint_generic">Настройки → Приложения → Bekon → Показ поверх других окон → Разрешить.</string>
+    <string name="overlay_hint_xiaomi">Xiaomi/MIUI: Настройки → Приложения → Bekon → Другие разрешения → Всплывающие окна / Показ поверх других приложений → Разрешить. Проверьте, что экономия батареи не ограничивает Bekon.</string>
+    <string name="overlay_hint_samsung">Samsung: Настройки → Приложения → Bekon → Поверх других приложений → Разрешить.</string>
+    <string name="guidance_disclosure_title">Режим подсказок</string>
+    <string name="guidance_disclosure_body">Bekon видит экран (с вашего согласия) и распознаёт текст, чтобы рисовать подсказки, стрелки и номера. Пока вы листаете, текст этой сессии помнится только в памяти (очищается при остановке). Bekon никогда не нажимает и не печатает за вас — каждое действие делаете вы. Остановить можно из уведомления или с плашки статуса.</string>
+    <string name="core_step_overlay">Разрешить подсказки на экране</string>
+    <string name="dot_overlay_on">Подсказки: оверлей разрешён</string>
+    <string name="dot_overlay_off">Подсказки: разрешите показ поверх приложений</string>
 </resources>
