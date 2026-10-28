@@ -434,7 +434,9 @@ class SessionService : Service() {
                 checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         },
-        SetupStep.BATTERY to { isEmptyBatteryOptimizations() },
+        // Play build: never a required step (no REQUEST_IGNORE_BATTERY_OPTIMIZATIONS); the optional
+        // battery row in the setup guide only points to the system battery settings.
+        SetupStep.BATTERY to { pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE || isEmptyBatteryOptimizations() },
         SetupStep.SCREEN to { _state.value.captureGranted },
         SetupStep.GESTURES to {
             if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
@@ -563,23 +565,6 @@ class SessionService : Service() {
         releaseWakeLock()
         if (instance === this) instance = null
         super.onDestroy()
-    }
-
-    private fun requestBatteryOptimizationQuietly() {
-        if (Build.VERSION.SDK_INT < 23) return
-        try {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:$packageName")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                // Best-effort: if it throws or the device blocks it, ignore (never crash).
-                startActivity(intent)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "battery opt: ${e.message}")
-        }
     }
 
     private fun createChannel() {

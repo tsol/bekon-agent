@@ -14,8 +14,8 @@ android {
         applicationId = "pro.potoki.bekon.agent"
         minSdk = 24
         targetSdk = 36
-        versionCode = 35
-        versionName = "1.0.34"
+        versionCode = 36
+        versionName = "1.0.35"
     }
 
     // full: GitHub/sideload APK — AccessibilityService + optional Bekon Keys IME (autonomous agent).

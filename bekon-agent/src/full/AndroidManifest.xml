@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Optional Bekon Keys IME: only in the "full" flavor. The playStore flavor omits it. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Sideload build only: the "Stop optimizing battery?" dialog. The Play build has no
+         REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; it only points to the battery settings screens. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <queries>
+        <intent>
+            <action android:name="android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+        </intent>
+    </queries>
     <application>
         <service
             android:name=".device.ime.BekonImeService"

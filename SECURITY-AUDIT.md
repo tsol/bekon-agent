@@ -64,6 +64,8 @@ The original v1.0.9 finding was: the endpoint has no cryptographic authenticatio
 
 No SYSTEM_ALERT_WINDOW, contacts, SMS, location, storage or camera/mic permissions. The keyboard (IME) service exists only in the `full` flavor, not in the Play build.
 
+> **Update v1.0.35 (Play build):** the table above reflects v1.0.9. The Google Play (`playStore`) build now requests only SYSTEM_ALERT_WINDOW, FOREGROUND_SERVICE (+ _MEDIA_PROJECTION, _SPECIAL_USE), POST_NOTIFICATIONS, INTERNET, ACCESS_NETWORK_STATE and WAKE_LOCK. It has no AccessibilityService, no IME and no REQUEST_IGNORE_BATTERY_OPTIMIZATIONS (that permission is in the sideloaded `full` flavor only). `BIND_JOB_SERVICE` and `DUMP` appear in its manifest only as guard attributes on library components (ML Kit datatransport JobService, androidx.profileinstaller receiver); they are not requested by the app.
+
 ## Fixes in v1.0.10
 1. A guard inside `DeviceExecutor` itself: reads need a live, unpaused session; writes also need read-only off. This covers coach scripts and anything else that bypasses the MCP layer.
 2. Results of long calls that finish after Pause or Stop are dropped.

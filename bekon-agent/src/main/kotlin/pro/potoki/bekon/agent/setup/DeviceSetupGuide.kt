@@ -159,6 +159,8 @@ class DeviceSetupGuide(
         val background = !pro.potoki.bekon.agent.status.AgentAlert.inForeground()
         for (e in st["intents"]?.jsonArray ?: JsonArray(emptyList())) {
             val o = e.jsonObject
+            // Play build has no REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: skip that dialog, use the settings screens.
+            if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE && o.s("action") == "android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS") continue
             val i = if (o.s("bekon") == "projection") {
                 ctx.packageManager.getLaunchIntentForPackage(pkg) ?: continue
             } else Intent().apply {
