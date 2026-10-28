@@ -14,12 +14,21 @@ import pro.potoki.bekon.agent.status.AgentAlert
  */
 object Launcher {
     const val BLOCKED = "blocked_background"
+    const val OFFERED = "offered_to_user"
 
     data class Result(val opened: Boolean, val code: String, val text: String)
 
     fun launch(ctx: Context, intent: Intent, screenName: String, what: String, hint: String = ""): Result {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         AgentAlert.lastSetupIntent = intent
+        if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) {
+            // Guidance build: never open anything for the user — offer a "Tap to open" notification; the human decides.
+            val t = ctx.getString(R.string.setup_tap_to_open, screenName)
+            AgentAlert.post(ctx, t, ctx.getString(R.string.setup_tap_body) + if (hint.isNotEmpty()) "\n$hint" else "", intent)
+            return Result(false, OFFERED,
+                "$OFFERED: a notification '$t' was shown (target $what). Guidance mode never opens screens itself: " +
+                    "ask the human to tap the notification if they want to, then wait_for_change.")
+        }
         if (AgentAlert.inForeground()) {
             ctx.startActivity(intent)
             return Result(true, "opened", "opened $what")

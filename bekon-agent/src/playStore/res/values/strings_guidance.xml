@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- playStore (guidance mode) overrides: the assistant only sees the screen and shows hints; the user does every tap. -->
+<resources>
+    <string name="access_message">Assistant «%1$s» asks to connect (from %2$s). Allow it to see the screen and show you hints? You do every tap yourself.</string>
+    <string name="home_session_active">Guidance session active — the connected assistant sees the screen and shows you hints. You do every tap yourself.</string>
+    <string name="conn_connected_body">The assistant sees the screen and shows you hints; you do every tap yourself. You can stop at any time.</string>
+    <string name="notif_session_title">Bekon screen guidance active</string>
+    <string name="accessibility_service_description">Not used in this version of Bekon.</string>
+    <string name="wiz_explain_accessibility">Not used in this version: Bekon only shows hints, you do every tap yourself.</string>
+    <string name="core_a11y_body">Not used in this version: Bekon only shows hints, you do every tap yourself.</string>
+    <string name="g_dlg_full_control">Not used in this version.</string>
+    <string name="cap_taps">shows hints</string>
+    <string name="cap_no_taps">you tap</string>
+    <string name="cap_blind">can\'t see the screen</string>
+    <string name="cap_a11y_text_warn">The assistant sees only what screen sharing shows; it never taps or types.</string>
+    <string name="pill_goal_hint">What should the assistant help you with instead?</string>
+    <string name="wiz_screen_off">Screen sharing is off — the assistant cannot see the screen or show hints.</string>
+    <string name="capture_lost_body">Screen sharing is off — turn it back on so the assistant can see the screen and show hints.</string>
+    <string name="wiz_share_body">Send the link to your AI assistant — it will show you hints on the screen while you tap.</string>
+    <string name="status_working">Preparing a hint…</string>
+    <string name="setup_tap_body">Your assistant suggests opening this screen. Tap to open it — or ignore this.</string>
+    <string name="access_title">New assistant wants to connect</string>
+    <string name="access_note_title">Assistant «%1$s» asks to connect</string>
+    <string name="access_note_text">Assistant «%1$s» asks to connect (from %2$s) to see the screen and show hints. Tap Allow or Deny.</string>
+</resources>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- playStore (режим подсказок): ассистент только видит экран и показывает подсказки; все нажатия делает пользователь. -->
+<resources>
+    <string name="access_message">Ассистент «%1$s» просит подключиться (адрес %2$s). Разрешить ему видеть экран и показывать подсказки? Все нажатия вы делаете сами.</string>
+    <string name="home_session_active">Сеанс подсказок активен — подключённый ассистент видит экран и показывает подсказки. Все нажатия вы делаете сами.</string>
+    <string name="conn_connected_body">Ассистент видит экран и показывает подсказки; все нажатия вы делаете сами. Остановить можно в любой момент.</string>
+    <string name="notif_session_title">Bekon: подсказки на экране включены</string>
+    <string name="accessibility_service_description">Не используется в этой версии Bekon.</string>
+    <string name="wiz_explain_accessibility">Не используется в этой версии: Bekon только показывает подсказки, нажимаете вы сами.</string>
+    <string name="core_a11y_body">Не используется в этой версии: Bekon только показывает подсказки, нажимаете вы сами.</string>
+    <string name="g_dlg_full_control">Не используется в этой версии.</string>
+    <string name="cap_taps">показывает подсказки</string>
+    <string name="cap_no_taps">нажимаете вы</string>
+    <string name="cap_blind">не видит экран</string>
+    <string name="cap_a11y_text_warn">Ассистент видит только то, что показывает трансляция экрана; он никогда не нажимает и не печатает.</string>
+    <string name="pill_goal_hint">С чем ассистенту помочь вместо этого?</string>
+    <string name="wiz_screen_off">Показ экрана выключен — ассистент не видит экран и не может показывать подсказки.</string>
+    <string name="capture_lost_body">Показ экрана отключён — включите снова, чтобы ассистент видел экран и показывал подсказки.</string>
+    <string name="wiz_share_body">Отправьте ссылку своему AI-ассистенту — он будет показывать подсказки на экране, а нажимаете вы.</string>
+    <string name="status_working">Готовлю подсказку…</string>
+    <string name="setup_tap_body">Ассистент предлагает открыть этот экран. Нажмите, чтобы открыть, — или просто пропустите.</string>
+    <string name="access_title">Новый ассистент хочет подключиться</string>
+    <string name="access_note_title">Ассистент «%1$s» просит подключиться</string>
+    <string name="access_note_text">Ассистент «%1$s» просит подключиться (адрес %2$s), чтобы видеть экран и показывать подсказки. Нажмите «Разрешить» или «Отклонить».</string>
+</resources>

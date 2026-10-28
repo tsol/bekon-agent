@@ -49,7 +49,8 @@ class McpHandler(
         const val WAIT_DEFAULT_MS = 30_000
         const val WAIT_MAX_MS = 90_000
         const val POLL_MS = 1_000L
-        const val COACH_INSTRUCTIONS =
+        val COACH_INSTRUCTIONS: String =
+            if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "" else (
             "Coaching a human (e.g. device setup): you decide what to coach; Bekon only waits. " +
                 "Loop: snapshot (keep its baseline token) -> coach_draw a hint on the exact control -> " +
                 "Build every hint from the CURRENT snapshot (its refs/bounds), never from assumed or remembered layouts: menus differ per phone and Android version. " +
@@ -60,13 +61,24 @@ class McpHandler(
                 "arrow_down 'Прокрутите ниже' when it is not) and call wait_for_script; the phone moves the highlight itself. " +
                 "Before Accessibility (Gestures) is on you cannot tap, scroll, snapshot or draw on the phone: only screenshot/annotate_screenshot work, " +
                 "so coach the human in chat with annotated screenshots to scroll and tap themselves (never use tap/swipe for the human). Marks are cleared automatically when wait_for_change sees a change."
-        const val STATUS_INSTRUCTIONS =
+            )
+        val STATUS_INSTRUCTIONS: String =
+            if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "" else (
             "Keep the human informed on the phone with agent_status (a small pill inside the bacon frame; touches pass through): " +
                 "call agent_status state=working with a short text when you start a task, state=waiting when the human must act (e.g. 'Нажмите «Разрешить»'; the pill already shows the state label, so do NOT prefix the text with 'Нужны вы:'/'Working:' etc.), optional step/total to show 'шаг 2 из 4', " +
                 "state=error if you are stuck, and state=done with a one-line summary when finished (e.g. 'Готово — можно остановить доступ'). " +
                 "Only one agent may be connected at a time. The human can answer from the pill menu: watch userEvents in wait_for_change/wait_for_script results (or call user_events). " +
                 "The pill also shows live capabilities (sees screen / can tap / paused), also returned as capabilities in agent_status and connection_info: trust them, not assumptions. " +
                 "Write the text in the HUMAN's language: use deviceInfo.language from initialize/connection_info/agent_status (device locale, e.g. ru = Russian) unless the human writes to you in another language. Keep it under ~60 characters."
+            )
+        /** Guidance (playStore) build: the assistant only sees the screen and draws hints; the human does every tap. */
+        const val GUIDANCE_INSTRUCTIONS =
+            "Guidance mode: you can see the screen and show the human hints; the human does every tap, swipe and keystroke themselves. " +
+                "There are no input tools in this build. Loop: ocr_screen or find_text (text, contains, acrossHistory) to locate the target -> " +
+                "show a hint (find_text draw=true, som_marks numbered marks, coach_draw circle/arrow/box in screen pixels, or guidance_step with a short caption) -> " +
+                "wait_for_change -> read the new screen and show the next hint, or coach_clear when done. " +
+                "If the target is below the fold, find_text acrossHistory=true returns scrollHint: show an arrow asking the human to scroll, then look again. " +
+                "Build every hint from the CURRENT screen, never from remembered layouts. Never ask the human to type 'done'."
         const val READ_ONLY = "device is in read-only mode so this action was declined."
         const val AUTH_INFO = "Session token: send 'Authorization: Bearer <bekon_session_token>' (or X-Bekon-Token) plus X-Bekon-Client-Id on every request; " +
             "the token was issued when the owner approved you and ends with the session or when another agent is approved."
@@ -83,9 +95,9 @@ class McpHandler(
             "open_url", "shortcut_add", "shortcut_remove",
             "find_text", "ocr_screen", "som_marks", "nav_mark", "guidance_step",
         )
-        val GUIDANCE = pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE
+        const val GUIDANCE = pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE
         /** Tools hidden from tools/list in guidance mode. */
-        val GUIDANCE_HIDDEN = AUTONOMOUS_TOOLS + setOf("coach_script", "wait_for_script", "scan_list")
+        val GUIDANCE_HIDDEN = AUTONOMOUS_TOOLS + setOf("coach_script", "wait_for_script", "scan_list", "shortcuts")
     }
 
 
@@ -978,7 +990,7 @@ class McpHandler(
                 put("endpoint", u?.let { pro.potoki.bekon.agent.handoff.Handoff.endpoint(it) } ?: "")
                 put("sourceUrl", pro.potoki.bekon.agent.ui.SourceCode.url)
                 put("auth", AUTH_INFO)
-                put("text", u?.let { pro.potoki.bekon.agent.handoff.Handoff.text(it) } ?: "Bekon Agent MCP (Android remote control). No public tunnel URL yet.")
+                put("text", u?.let { pro.potoki.bekon.agent.handoff.Handoff.text(it) } ?: (if (GUIDANCE) "Bekon Agent MCP (screen guidance: hints only, the human taps). No public tunnel URL yet." else "Bekon Agent MCP (Android remote control). No public tunnel URL yet."))
             }
         }
         "device_setup_guide" -> (setup ?: throw CapabilityException("setup guide: not available")).guide()
@@ -986,9 +998,11 @@ class McpHandler(
             val g = setup ?: throw CapabilityException("setup guide: not available")
             buildJsonObject { val opened = g.open(args.str("step"))
             val blocked = opened.startsWith(pro.potoki.bekon.agent.setup.Launcher.BLOCKED)
-            put("ok", !blocked)
-            put("result", if (blocked) "blocked_background: user must tap notification" else "opened")
-            val next = if (executor.health()["touch"] == false)
+            val offered = opened.startsWith(pro.potoki.bekon.agent.setup.Launcher.OFFERED)
+            put("ok", !blocked && !offered)
+            put("result", if (offered) "offered_to_user: the human may tap the notification" else if (blocked) "blocked_background: user must tap notification" else "opened")
+            val next = if (GUIDANCE) ". Next: when the human has opened it, ocr_screen / find_text -> show a hint -> wait_for_change."
+            else if (executor.health()["touch"] == false)
                 ". Accessibility is OFF: you cannot snapshot, tap, scroll or draw on the phone. Next: screenshot, annotate_screenshot the control and show it to the human, then wait_for_change (pixel mode) and screenshot again. The human scrolls and taps."
             else ". Next: coach_script (rules follow scrolling) or snapshot -> coach_draw -> wait_for_change and read the diff. Never wait for a chat reply during setup."
             put("text", opened + next) }
@@ -1142,8 +1156,8 @@ class McpHandler(
             "Phone manufacturer/model/SDK/ROM and the ordered OEM-specific setup steps Bekon needs (restricted settings, accessibility, notifications, autostart, battery, background popups, screen capture 'Entire screen'), each with EN/RU text, settings path and live status ok/todo/unknown. Use before coaching a user through setup.",
             schema(),
         )
-        tool("open_setup_screen", "Open the best settings screen for a step id from device_setup_guide (tries OEM intents with fallbacks). Extra ids: app_details (Android App info for Bekon), play_listing (Bekon in Google Play). If the result is blocked_background, the human must tap the notification.", schema { str("step") })
-        tool("open_url", "Open an https URL on the phone in the default browser/app without saving a shortcut. Returns blocked_background if Android blocked it (the human then taps a notification).", schema { str("url") })
+        tool("open_setup_screen", if (GUIDANCE) "Offer the human a settings screen for a step id from device_setup_guide: shows a 'Tap to open' notification; Bekon never opens it itself. Extra ids: app_details, play_listing. Then wait_for_change." else "Open the best settings screen for a step id from device_setup_guide (tries OEM intents with fallbacks). Extra ids: app_details (Android App info for Bekon), play_listing (Bekon in Google Play). If the result is blocked_background, the human must tap the notification.", schema { str("step") })
+        tool("open_url", if (GUIDANCE) "Offer the human an https URL: shows a 'Tap to open' notification; Bekon never opens it itself. Then wait_for_change." else "Open an https URL on the phone in the default browser/app without saving a shortcut. Returns blocked_background if Android blocked it (the human then taps a notification).", schema { str("url") })
         tool("tap", "Tap at screen coordinates", schema { int("x"); int("y") })
         tool("swipe", "Swipe between two points", schema { int("x1"); int("y1"); int("x2"); int("y2"); int("ms", required = false) })
         tool("longPress", "Long-press at a screen coordinate", schema { int("x"); int("y") })

@@ -10,13 +10,15 @@ import pro.potoki.bekon.agent.mcp.McpHandler
  */
 object AgentGuide {
     /** Same text initialize returns as `instructions`. */
-    val SERVER_INSTRUCTIONS: String get() = ClientGate.INSTRUCTIONS + " " + McpHandler.COACH_INSTRUCTIONS + " " + McpHandler.STATUS_INSTRUCTIONS
+    val SERVER_INSTRUCTIONS: String get() = ClientGate.INSTRUCTIONS + " " +
+        (if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) McpHandler.GUIDANCE_INSTRUCTIONS else McpHandler.COACH_INSTRUCTIONS + " " + McpHandler.STATUS_INSTRUCTIONS)
 
     fun markdown(baseUrl: String?): String {
         val base = baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/mcp")?.takeIf { it.isNotEmpty() }
         val mcp = base?.let { "$it/mcp" } ?: "/mcp"
         val root = base ?: ""
         val hdr = ClientGate.HEADER
+        if (GUIDANCE) return connectBlock(mcp, root) + guidanceMarkdown(mcp, hdr)
         return connectBlock(mcp, root) + """
 
 # Bekon: an Android phone shared with you over MCP
@@ -126,6 +128,45 @@ ${SERVER_INSTRUCTIONS}
 """.trimStart()
     }
 
+
+    private const val GUIDANCE = pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE
+
+    /** Guide for the guidance (playStore) build: see + hint only, the human does every tap. */
+    private fun guidanceMarkdown(mcp: String, hdr: String): String = """
+
+# Bekon: screen guidance for an Android phone, over MCP
+
+You are reading this because the phone's owner showed you a QR code or link from the Bekon Agent app.
+In this build Bekon lets an AI assistant SEE the screen and SHOW HINTS (highlights, arrows, numbered marks,
+short captions). The human does every tap, swipe and keystroke themselves. There are no input tools.
+
+## Consent
+- The owner installed Bekon, accepted the disclosure, pressed Start and shared this link with you on purpose.
+- A persistent frame and notification are shown while a session is live. The owner can Stop at any time.
+- Only help with what the human asked. Do not read their private data beyond the task.
+
+## Connect (MCP, streamable HTTP)
+- Endpoint: $mcp (JSON-RPC 2.0 over HTTP POST). Send header `$hdr: <your-stable-id>` on every request and
+  the same id as `params.clientInfo.uniqueId` in `initialize`.
+- The owner approves you on the phone. The approved response carries `bekon_session_token` (also the
+  `X-Bekon-Token` header); send `Authorization: Bearer <token>` on every later request.
+
+## Device language
+- UI locale `${pro.potoki.bekon.agent.status.AgentStatus.localeTag()}` (${pro.potoki.bekon.agent.status.AgentStatus.languageName()}). Write hints in this language.
+
+## Tools
+${Handoff.GUIDANCE_TOOLS}, connection_info, device_setup_guide, current_screen_fingerprint, nav_mark.
+
+## Hint loop
+1. `ocr_screen` or `find_text` {text, contains:true} to locate the target on the CURRENT screen.
+2. Show it: `find_text` draw=true, `som_marks` (numbered marks), `coach_draw` (screen pixels), or `guidance_step` (caption + Next).
+3. `wait_for_change`, then look again and show the next hint; `coach_clear` when done.
+- Below the fold: `find_text` acrossHistory=true returns `scrollHint`; draw an arrow asking the human to scroll.
+
+## Server instructions (identical to initialize.instructions)
+${SERVER_INSTRUCTIONS}
+"""
+
     /** Short hint for GET /mcp without a JSON-RPC body. */
     /** Universal "how to connect" block shown first on / , /llms.txt and GET /mcp. No app-specific links. */
     /**
@@ -150,7 +191,7 @@ ${SERVER_INSTRUCTIONS}
         return """
 # HOW TO CONNECT (read first)
 - **If you are a chatbot that can only open web pages (ChatGPT etc.), do NOT stop — open this link now:** $link
-  (Owner taps Allow on the phone; then use the one-shot action links. No MCP/POST needed.)
+  (Owner taps Allow on the phone; then use the one-shot ${if (GUIDANCE) "hint" else "action"} links. No MCP/POST needed.)
 - **Preferred when you can POST — MCP:** JSON-RPC 2.0 at $mcp (details below), or ask the user to add $mcp as a custom MCP connector (Streamable HTTP, no auth).
 - The owner approves you on the phone; nothing else is needed (no account, no API key).
 """.trimStart()
@@ -165,8 +206,8 @@ ${SERVER_INSTRUCTIONS}
         val esc = { s: String -> s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;") }
         return """
 <!doctype html><html><head><meta charset=utf-8><meta name="robots" content="all">
-<title>Bekon — use link control</title></head><body>
-<p><b>You can't use MCP from here? Control this phone via links: open <a href="${esc(link)}">${esc(link)}</a></b></p>
+<title>Bekon — use ${if (GUIDANCE) "link guidance" else "link control"}</title></head><body>
+<p><b>You can't use MCP from here? ${if (GUIDANCE) "Show hints on this phone via links" else "Control this phone via links"}: open <a href="${esc(link)}">${esc(link)}</a></b></p>
 <p>That is the fallback for chatbots that can only open web pages (ChatGPT etc.). Do not stop — open the link above.
 The phone owner taps Allow; then follow the on-screen one-shot action links.</p>
 <p>If you <i>can</i> POST JSON-RPC, use MCP at <a href="${esc(mcp)}">${esc(mcp)}</a> instead (Streamable HTTP).</p>
@@ -178,7 +219,7 @@ The phone owner taps Allow; then follow the on-screen one-shot action links.</p>
     /** Plain-text twin of [mcpGetHtml] (same first-line instruction). */
     fun mcpGetText(baseUrl: String?): String {
         val (_, mcp, link) = urls(baseUrl)
-        return "You can't use MCP from here? Control this phone via links: open $link\n" +
+        return "You can't use MCP from here? ${if (GUIDANCE) "Show hints on this phone via links" else "Control this phone via links"}: open $link\n" +
             "Do NOT stop — open that URL (chatbots / ChatGPT etc.). Owner taps Allow, then use the action links.\n" +
             "If you can POST JSON-RPC, use MCP at $mcp instead. Full guide: GET /\n"
     }
@@ -216,6 +257,6 @@ Allow: /s/
         val (_, mcp, link) = urls(baseUrl)
         return "Bekon MCP endpoint: POST JSON-RPC 2.0 here ($mcp) with header ${ClientGate.HEADER}: <stable-id>; " +
             "after the owner approves you, also send Authorization: Bearer <bekon_session_token>. " +
-            "Web-only chatbot? Do NOT stop — open $link instead (link control, no POST)."
+            "Web-only chatbot? Do NOT stop — open $link instead (${if (GUIDANCE) "link guidance" else "link control"}, no POST)."
     }
 }

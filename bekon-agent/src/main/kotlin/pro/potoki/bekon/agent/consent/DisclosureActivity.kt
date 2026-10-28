@@ -38,8 +38,9 @@ class DisclosureActivity : ComponentActivity() {
         const val EXTRA_KIND = "kind"
         const val EXTRA_OPEN = "open"
 
-        val A11Y_TITLE = "Bekon uses the Accessibility service"
-        val A11Y_POINTS = listOf(
+        // Guidance (playStore) build has no Accessibility service; keep its disclosure text out of that build.
+        val A11Y_TITLE = if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "" else "Bekon uses the Accessibility service"
+        val A11Y_POINTS = if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) emptyList() else listOf(
             "What it does: with your permission Bekon's Accessibility service can READ what is shown on the screen (text, buttons, fields) and PERFORM ACTIONS for you: taps, swipes, typing text and Back/Home.",
             "Why: so a remote assistant (an AI agent or a person helping you) that YOU connect can see your screen and operate the phone to complete the task you asked for.",
             "Where the data goes: screen content and actions are exchanged only with the agent you explicitly connect by sharing this phone's tunnel link / QR code. Every new agent must be approved on this phone. Bekon does not sell this data or use it for ads.",

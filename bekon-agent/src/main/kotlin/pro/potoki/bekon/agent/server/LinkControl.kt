@@ -124,8 +124,8 @@ class LinkControl(
         }.apply { isDaemon = true; name = "bekon-link-ask"; start() }
         val wait = abs("/link/wait?ticket=$ticket")
         return html(200, """
-            <h1>Bekon — link control</h1>
-            <p><b>You are in the right place.</b> This is how chatbots that can only open web pages control the phone (no MCP/POST).</p>
+            <h1>Bekon — ${if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "link guidance" else "link control"}</h1>
+            <p><b>You are in the right place.</b> ${if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "This is how chatbots that can only open web pages see the screen and show the owner hints; the owner does every tap (no MCP/POST)." else "This is how chatbots that can only open web pages control the phone (no MCP/POST)."}</p>
             <p>Ask the phone owner to tap <b>Allow</b> for client <code>${esc(client)}</code>.</p>
             <p>Then open (or refresh):</p>
             <p><a href="$wait">$wait</a></p>

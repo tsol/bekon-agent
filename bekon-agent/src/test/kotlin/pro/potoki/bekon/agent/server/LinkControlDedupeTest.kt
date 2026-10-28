@@ -42,6 +42,8 @@ class LinkControlDedupeTest {
 
     @Test
     fun `owner changed_mind banner and invalidates nonces`() {
+        // Full-flavor action links / tap tools; the playStore (guidance) build has none.
+        org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
         // Clear any leftover events from other tests
         UserEvents.drain()
         val items = AtomicReference(
@@ -134,6 +136,8 @@ class LinkControlDedupeTest {
 
     @Test
     fun `ime nodes collapsed to one keyboard line`() {
+        // Full-flavor action links / tap tools; the playStore (guidance) build has none.
+        org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
         UserEvents.drain()
         val items = listOf(
             n("k1", "q", 0, 1800, 100, 1900, window = "ime"),
@@ -191,6 +195,8 @@ class LinkControlDedupeTest {
 
     @Test
     fun `action note has no html entities for quotes`() {
+        // Full-flavor action links / tap tools; the playStore (guidance) build has none.
+        org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
         UserEvents.drain()
         val items = listOf(n("e1", "More", 10, 10, 100, 80, clickable = true, window = "application"))
         val ex = object : ActionExecutor {
@@ -277,6 +283,8 @@ class LinkControlDedupeTest {
 
     @Test
     fun `type with enter, scroll fallback, open url validation`() {
+        // Full-flavor action links / tap tools; the playStore (guidance) build has none.
+        org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
         UserEvents.drain()
         val ex = Ex2()
         val opened = ArrayList<String>()
@@ -307,6 +315,8 @@ class LinkControlDedupeTest {
 
     @Test
     fun `open url refused in read-only`() {
+        // Full-flavor action links / tap tools; the playStore (guidance) build has none.
+        org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
         UserEvents.drain()
         val opened = ArrayList<String>()
         val apps = object : LinkControl.Apps {
@@ -366,6 +376,8 @@ class LinkControlDedupeTest {
 
     @Test
     fun `tap re-finds moved element and refuses when gone`() {
+        // Full-flavor action links / tap tools; the playStore (guidance) build has none.
+        org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
         UserEvents.drain()
         val ex = Moving()
         val (links, token) = linkSession(ex)
@@ -396,6 +408,8 @@ class LinkControlDedupeTest {
 
     @Test
     fun `duplicate labels disambiguated and second one is tapped by gesture`() {
+        // Full-flavor action links / tap tools; the playStore (guidance) build has none.
+        org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
         UserEvents.drain()
         val ex = Moving()
         ex.items = listOf(

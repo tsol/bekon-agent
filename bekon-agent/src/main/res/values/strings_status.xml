@@ -45,4 +45,16 @@
     <string name="access_replace_message">Replace agent «%1$s» with «%2$s»? Only one agent can be connected at a time.</string>
     <string name="notif_ready_title">Bekon is ready for your agent</string>
     <string name="pill_stop_session">Stop the session</string>
+    <string name="cap_guidance">guidance · you tap</string>
+    <string name="cap_guidance_no_overlay">guidance · allow overlay to show hints</string>
+    <string name="core_hint_overlay">Allow Bekon to display over other apps so it can draw hints on your screen. You still tap everything yourself.</string>
+    <string name="core_step_overlay">Allow on-screen hints</string>
+    <string name="dot_overlay_off">Hints: allow display over apps</string>
+    <string name="dot_overlay_on">Hints: overlay allowed</string>
+    <string name="guidance_disclosure_body">Bekon sees your screen (with your consent) and can recognize on-screen text to draw hints, arrows and numbered marks. While you scroll, it remembers text from this session in memory only (cleared when you stop). Bekon never taps or types for you — you perform every action. Stop anytime from the notification or the status pill.</string>
+    <string name="guidance_disclosure_title">Guidance mode</string>
+    <string name="overlay_hint_generic">Settings → Apps → Bekon → Display over other apps → Allow.</string>
+    <string name="overlay_hint_samsung">Samsung: Settings → Apps → Bekon → Appear on top (or Display over other apps) → Allow.</string>
+    <string name="overlay_hint_xiaomi">Xiaomi/MIUI: Settings → Apps → Manage apps → Bekon → Other permissions → Display pop-up windows / Display over other apps → Allow. Also check Battery saver is not restricting Bekon.</string>
+    <string name="pill_next_step">Next step</string>
 </resources>

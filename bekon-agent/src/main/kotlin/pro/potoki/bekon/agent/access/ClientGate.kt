@@ -113,18 +113,21 @@ class ClientGate(
             "Approved by the owner. From now on send 'Authorization: Bearer <bekon_session_token>' (or header X-Bekon-Token) " +
                 "together with X-Bekon-Client-Id on EVERY request of this session. The token is valid only until the session stops " +
                 "or another agent is approved; after that you get 401 and must initialize again without a token."
-        const val INSTRUCTIONS =
+        private val SHORTCUT_INSTRUCTIONS: String =
+            if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "" else (
+                " After you connect, call shortcuts before hunting through the home screen. " +
+                "The list may already open the app or page this task needs. " +
+                "shortcut_open launches one by id. " +
+                "shortcut_add saves an app (target is the package name) or an https url you will open again. " +
+                "shortcut_remove deletes one by id."
+            )
+        val INSTRUCTIONS: String =
             "Always identify yourself at the start with a stable uniqueId: header X-Bekon-Client-Id on every request and " +
                 "clientInfo.uniqueId in initialize. The owner approves you on the phone; the approved response carries " +
                 "bekon_session_token (also in the X-Bekon-Token response header). Send 'Authorization: Bearer <token>' on every " +
                 "later request. Tokens are per session and are never remembered: each new session needs a new approval. " +
                 "Only ONE agent can be connected at a time: a second id must be approved by the owner as a replacement, which revokes " +
-                "the previous agent's token. " +
-                "After you connect, call shortcuts before hunting through the home screen. " +
-                "The list may already open the app or page this task needs. " +
-                "shortcut_open launches one by id. " +
-                "shortcut_add saves an app (target is the package name) or an https url you will open again. " +
-                "shortcut_remove deletes one by id."
+                "the previous agent's token." + (if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "" else SHORTCUT_INSTRUCTIONS)
     }
 }
 

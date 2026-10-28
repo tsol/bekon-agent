@@ -17,16 +17,21 @@ class PrivacyPolicyAssetTest {
         generateSequence(File("").absoluteFile) { it.parentFile }
             .map { File(it, rel) }.firstOrNull { it.isFile }
 
-    @Test
-    fun bundledPolicyMatchesPublishedCopy() {
-        // Only meaningful inside the monorepo (play-store-pack/ is not published with the standalone app repo).
-        val published = tryFind("play-store-pack/privacy.html")
+    private fun check(publishedRel: String, assetDir: String) {
+        val published = tryFind("play-store-pack/$publishedRel")
         org.junit.Assume.assumeTrue("play-store-pack not present (standalone repo)", published != null)
-        val asset = tryFind("apps/bekon-agent/src/main/assets/${PrivacyPolicy.ASSET}")
-            ?: find("bekon-agent/src/main/assets/${PrivacyPolicy.ASSET}")
-        published!!
-        assertEquals("update src/main/assets/privacy.html from play-store-pack/privacy.html", published.readText(), asset.readText())
+        val asset = tryFind("apps/bekon-agent/src/$assetDir/assets/${PrivacyPolicy.ASSET}")
+            ?: find("bekon-agent/src/$assetDir/assets/${PrivacyPolicy.ASSET}")
+        assertEquals("update src/$assetDir/assets/privacy.html from play-store-pack/$publishedRel", published!!.readText(), asset.readText())
     }
+
+    /** Google Play (guidance) build ships the published policy; it overrides the main asset. */
+    @Test
+    fun bundledPolicyMatchesPublishedCopy() = check("privacy.html", "playStore")
+
+    /** Sideloaded full build keeps the policy that also covers the optional Accessibility service. */
+    @Test
+    fun fullPolicyMatchesFullCopy() = check("privacy-full.html", "main")
 
     @Test
     fun publicUrlIsHttps() {

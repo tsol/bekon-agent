@@ -95,6 +95,8 @@ class LocalServerTest {
 
     @Test
     fun `health and snapshot and tap routes respond`() = runBlocking {
+        // Full-flavor action links / tap tools; the playStore (guidance) build has none.
+        org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
         val port = freePort()
         val executor = FakeExecutor()
         val srv = LocalServer(port, executor, McpHandler(executor))

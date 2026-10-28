@@ -587,7 +587,7 @@ private fun SettingsMenuButton() {
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text(stringResource(R.string.home_privacy)) }, onClick = { open = false; Consent.openPrivacyPolicy(ctx) })
-            DropdownMenuItem(
+            if (!BuildConfig.GUIDANCE_MODE) DropdownMenuItem(
                 text = { Text(stringResource(R.string.home_a11y_disclosure)) },
                 onClick = { open = false; Consent.showDisclosure(ctx, Consent.Kind.A11Y, thenOpenSettings = false) },
             )

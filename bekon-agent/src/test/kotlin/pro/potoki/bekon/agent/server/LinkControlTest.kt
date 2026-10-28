@@ -75,6 +75,8 @@ class LinkControlTest {
 
     @Test
     fun `start wait screen one-shot and coach in read-only`() {
+        // Full-flavor action links / tap tools; the playStore (guidance) build has none.
+        org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
         val g = gate(true)
         val (triple, ro) = run {
             val t = ctl(g = g)
@@ -166,6 +168,8 @@ class LinkControlTest {
 
     @Test
     fun `status and done update AgentStatus pill path`() {
+        // Full-flavor action links / tap tools; the playStore (guidance) build has none.
+        org.junit.Assume.assumeFalse(pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE)
         AgentStatus.clear()
         val g = gate(true)
         val links = LinkControl(

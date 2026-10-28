@@ -2,9 +2,18 @@
 
 <img src="docs/bekon-icon.png" width="96" alt="Bekon icon" align="right">
 
-Bekon Agent is an Android app that lets an AI agent you trust see and operate your phone, with
-your consent, through a private link. The screen is shared only while a session is running; a
-visible frame, a notification and a one-tap **Stop** are shown for the whole session.
+Bekon Agent is an Android app that lets an AI agent you trust see your phone screen, with your
+consent, through a private link. The screen is shared only while a session is running; a visible
+frame, a notification and a one-tap **Stop** are shown for the whole session.
+
+Two builds come from the same source:
+
+- **Google Play build (`playStore` flavor) — guidance only.** The assistant sees the shared screen and
+  shows hints (highlights, arrows, numbered marks, step captions). It never taps, swipes or types:
+  the user does every action. No Accessibility service, no keyboard, no input injection; "open" requests
+  become a "Tap to open" notification the user may tap.
+- **Sideloaded build (`full` flavor).** Adds an optional Accessibility service (with its own disclosure)
+  through which an approved agent can also tap, swipe and type.
 
 - Module: [`bekon-agent/`](bekon-agent/) (Kotlin, Jetpack Compose)
 - Architecture: [`bekon-agent/ARCHITECTURE.md`](bekon-agent/ARCHITECTURE.md)
@@ -12,7 +21,7 @@ visible frame, a notification and a one-tap **Stop** are shown for the whole ses
 
 ## Verify this build / ask your agent to audit
 
-Every release is tagged with its version (`v1.0.1` … `v1.0.32`, …). The app's
+Every release is tagged with its version (`v1.0.1` … `v1.0.33`, …). The app's
 "ask your agent to check our code" button opens the tag matching the installed version, for example
 <https://github.com/tsol/bekon-agent/tree/v1.0.9>.
 
