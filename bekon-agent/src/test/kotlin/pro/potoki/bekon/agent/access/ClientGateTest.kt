@@ -17,18 +17,38 @@ class ClientGateTest {
     @Before fun setUp() = AgentConnections.clear()
     @After fun tearDown() = AgentConnections.clear()
 
-    @Test fun approvalIssuesRandomTokenThenTokenRequired() {
+    @Test fun approvalIssuesRandomTokenThenLostTokenNeedsANewPrompt() {
         var asks = 0
-        val gate = ClientGate(Auto(), paused = { false }, ask = { _, _, _ -> asks++; true })
+        val replacing = ArrayList<String?>()
+        val gate = ClientGate(Auto(), paused = { false }, ask = { _, _, rep -> asks++; replacing += rep; true })
         val tok = allowed(gate.check("alpha", "1.1.1.1", null)).issuedToken
         assertNotNull(tok)
         assertTrue("32 bytes base64url", tok!!.length == 43 && tok.matches(Regex("[A-Za-z0-9_-]+")))
         // valid token: allowed, no new token, no new prompt
         assertNull(allowed(gate.check("alpha", "1.1.1.1", tok)).issuedToken)
-        // approved id without token: 401, owner NOT re-prompted
-        val r = rejected(gate.check("alpha", "1.1.1.1", null))
-        assertEquals(401, r.status); assertEquals(ClientGate.TOKEN_REQUIRED, r.reason)
         assertEquals(1, asks)
+        // approved id without token (lost it): the owner IS asked again; Allow issues a NEW token, the old one dies
+        val tok2 = allowed(gate.check("alpha", "1.1.1.1", null)).issuedToken!!
+        assertEquals(2, asks)
+        assertEquals("the prompt says it is the same agent asking again", "alpha", replacing.last())
+        assertNotEquals(tok, tok2)
+        assertEquals(401, rejected(gate.check("alpha", "1.1.1.1", tok)).status)
+        assertEquals(ClientGate.Status.ALIVE, gate.status("alpha", tok2))
+    }
+
+    @Test fun lostTokenPromptDeniedKeepsTheOldSessionAndNeverLeaksIt() {
+        val answers = java.util.ArrayDeque(listOf(true, false, false, false))
+        var asks = 0
+        val gate = ClientGate(Auto(), paused = { false }, ask = { _, _, _ -> asks++; answers.poll() ?: false })
+        val tok = allowed(gate.check("alpha", "1.1.1.1", null)).issuedToken!!
+        repeat(3) {
+            val r = rejected(gate.check("alpha", "6.6.6.6", null))
+            assertEquals(ClientGate.PROMPT_CLOSED, r.reason)
+            assertTrue(!r.reason.contains(tok))
+        }
+        assertEquals("prompted every time, never silently", 4, asks)
+        assertEquals(ClientGate.Status.ALIVE, gate.status("alpha", tok))
+        assertNull(allowed(gate.check("alpha", "1.1.1.1", tok)).issuedToken)
     }
 
     @Test fun wrongTokenOrOtherIdsTokenIs401() {
@@ -102,19 +122,22 @@ class ClientGateTest {
         val gate = ClientGate(Auto(), paused = { false }, ask = { _, _, _ -> asks++; true })
         val tok = allowed(gate.check("stateless-1", "1.1.1.1", null)).issuedToken!!
         repeat(3) {
-            val r = rejected(gate.check("stateless-1", "9.9.9.9", null))
-            assertEquals(401, r.status)
-            assertTrue(!r.reason.contains(tok))
+            // Every id-only call is a fresh owner prompt; Allow gives a NEW token, never the old one back.
+            val t = allowed(gate.check("stateless-1", "9.9.9.9", null)).issuedToken!!
+            assertNotEquals(tok, t)
         }
+        assertEquals(4, asks)
+        val cur = gate.tokenFor("stateless-1")!!
+        assertEquals(401, rejected(gate.check("stateless-1", "1.1.1.1", tok)).status)
         // id + valid token = silent reconnect of the same session (no prompt, no new token, same scope).
-        assertNull(allowed(gate.check("stateless-1", "1.1.1.1", tok)).issuedToken)
-        assertEquals(1, asks)
+        assertNull(allowed(gate.check("stateless-1", "1.1.1.1", cur)).issuedToken)
+        assertEquals(4, asks)
         // Stopped session: token dies, status says invalid, re-initialize asks the owner again.
         gate.reset()
-        assertEquals(ClientGate.Status.INVALID, gate.status("stateless-1", tok))
-        assertEquals(401, rejected(gate.check("stateless-1", "1.1.1.1", tok)).status)
-        assertNotEquals(tok, allowed(gate.check("stateless-1", "1.1.1.1", null)).issuedToken)
-        assertEquals(2, asks)
+        assertEquals(ClientGate.Status.INVALID, gate.status("stateless-1", cur))
+        assertEquals(401, rejected(gate.check("stateless-1", "1.1.1.1", cur)).status)
+        assertNotEquals(cur, allowed(gate.check("stateless-1", "1.1.1.1", null)).issuedToken)
+        assertEquals(5, asks)
     }
 
     @Test fun statusNeverAsksIssuesOrLeaks() {
@@ -180,10 +203,12 @@ class ClientGateTest {
         assertEquals(p.token, gate.tokenFor("madisson-geo"))
         assertNull(allowed(gate.check("madisson-geo", "1.1.1.1", p.token)).issuedToken)
         assertEquals(ClientGate.Status.ALIVE, gate.status("madisson-geo", p.token))
-        // The id alone never gets the token after approval.
+        // The id alone never gets the token after approval: it is a new owner prompt (here: Deny).
+        owner.answer = false
         val r = rejected(gate.check("madisson-geo", "9.9.9.9", null))
-        assertEquals(401, r.status); assertEquals(ClientGate.TOKEN_REQUIRED, r.reason)
-        assertEquals(1, owner.asked.get())
+        assertEquals(ClientGate.PROMPT_CLOSED, r.reason); assertTrue(!r.reason.contains(p.token))
+        assertEquals(2, owner.asked.get())
+        assertEquals(ClientGate.Status.ALIVE, gate.status("madisson-geo", p.token))
     }
 
     @Test fun ownerAllowsWithinHoldTheSameRequestGetsTheToken() {

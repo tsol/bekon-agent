@@ -9,8 +9,9 @@ import java.util.Base64
  *
  * 1. A client without a token names itself (X-Bekon-Client-Id / clientInfo.uniqueId) and the owner is asked on the phone.
  * 2. On Allow the gate issues a random session token (32 bytes, base64url) bound to that client id.
- * 3. Every later request must carry `Authorization: Bearer <token>` (or `X-Bekon-Token`). An approved id without a valid
- *    token gets 401 — the owner is never re-prompted silently.
+ * 3. Every later request must carry `Authorization: Bearer <token>` (or `X-Bekon-Token`). An approved id that lost its
+ *    token and initializes WITHOUT one gets a NEW owner prompt for the same id (lost-token recovery): on Allow a fresh
+ *    token replaces the old one; on Deny the old session is untouched. The token is never re-issued silently.
  * Tokens live in memory only: they die on Stop / session end ([reset]) and when the owner approves a replacement agent.
  * Nothing is remembered across sessions. Pause rejects everyone.
  */
@@ -80,8 +81,16 @@ class ClientGate(
             synchronized(this) { closed[presented] }?.let { return Decision.Reject(it) }
             return Decision.Reject(INVALID_TOKEN, 401)
         }
-        // An approved id WITHOUT its token never gets it again (the id is not a secret).
-        if (expected != null) return Decision.Reject(TOKEN_REQUIRED, 401)
+        // An approved id WITHOUT its token never gets it back silently (the id is not a secret). Lost-token recovery:
+        // the owner is asked again (every time) for the same id; Allow replaces the old token with a new one.
+        if (expected != null) {
+            val p = synchronized(this) {
+                val cur = prompt
+                if (cur != null && cur.id != id) return Decision.Reject(APPROVAL_PENDING)
+                cur ?: startPrompt(id, ip, null, reissue = true)
+            }
+            return await(p)
+        }
 
         val other = AgentConnections.active()?.takeIf { it != id && !AgentConnections.isIdle() }
         val auto = other == null && clients.autoAcceptNext() && synchronized(this) { tokens.isEmpty() } && AgentConnections.active() == null
@@ -101,15 +110,20 @@ class ClientGate(
     }
 
     /** Caller holds the lock. The owner prompt runs on its own thread, so it outlives any single HTTP request. */
-    private fun startPrompt(id: String, ip: String, other: String?): Prompt {
+    private fun startPrompt(id: String, ip: String, other: String?, reissue: Boolean = false): Prompt {
         val p = Prompt(id, newToken(), gen)
         prompt = p
         Thread {
-            val ok = try { ask(id, ip, other) } catch (_: Throwable) { false }
+            // replacing == id tells the prompt UI this is the same agent asking again (it lost its key).
+            val ok = try { ask(id, ip, if (reissue) id else other) } catch (_: Throwable) { false }
             val approved = synchronized(this) {
                 if (prompt === p) prompt = null
                 val live = ok && p.gen == gen
-                if (live) { tokens.clear(); tokens[id] = p.token } // one agent at a time: replacement revokes the old token
+                if (live) {
+                    tokens.clear(); tokens[id] = p.token // one agent at a time: replacement revokes the old token
+                    // New session token = new agent session: pill-menu events of an earlier session are never delivered.
+                    pro.potoki.bekon.agent.status.UserEvents.newSession()
+                }
                 else closed[p.token] = if (!ok && other != null) BUSY else PROMPT_CLOSED
                 p.allowed = live
                 live
@@ -134,7 +148,10 @@ class ClientGate(
         (check(clientId, ip, token) as? Decision.Reject)?.reason
 
     /** Session end / Stop / owner revoke: every token is invalid from now on. */
-    @Synchronized fun reset() { tokens.clear(); gen++; prompt?.let { closed[it.token] = PROMPT_CLOSED }; prompt = null }
+    @Synchronized fun reset() {
+        tokens.clear(); gen++; prompt?.let { closed[it.token] = PROMPT_CLOSED }; prompt = null
+        pro.potoki.bekon.agent.status.UserEvents.newSession()
+    }
 
     fun isPaused(): Boolean = paused()
 
@@ -150,6 +167,7 @@ class ClientGate(
     @Synchronized private fun issue(id: String): String {
         tokens[id]?.let { return it }
         tokens.clear() // one agent at a time: approving a replacement revokes the previous agent's token
+        pro.potoki.bekon.agent.status.UserEvents.newSession()
         return newToken().also { tokens[id] = it }
     }
 
@@ -185,13 +203,13 @@ class ClientGate(
         const val POLL_HOLD_MS = 2_000L
         const val PENDING_CODE = -32002
         const val PROMPT_CLOSED =
-            "access declined: the owner tapped Deny or did not answer in time (the prompt lasts about 2 minutes). " +
-                "Your token is void. Ask the human, then call initialize again WITHOUT a token to show a new prompt."
+            "access declined: the owner tapped Deny or did not answer in time (the prompt lasts about 2 minutes), or " +
+                "tapped 'Disconnect agent' or 'Stop'. This pending token is void. Ask the human, then call initialize again WITHOUT a token to show a new prompt."
         const val APPROVAL_PENDING =
             "approval_pending: the owner is already being asked to approve another client id. Do not retry with new ids. " +
                 "Use ONE stable uniqueId (save it to a file/config and reuse it across runs), wait, then retry."
         const val PENDING_MESSAGE =
-            "approval_pending: the owner has not tapped Allow on the phone yet. SAVE data.bekon_session_token NOW " +
+            "approval_pending: the owner has not tapped Allow on the phone yet. SAVE error.data.bekon_session_token NOW " +
                 "(also in the X-Bekon-Token header) together with your uniqueId. Then call initialize again every 3-5 s " +
                 "with the SAME uniqueId and 'Authorization: Bearer <that token>' (each poll answers within ~2 s). When the owner " +
                 "taps Allow you get a normal initialize result with approval=approved, and the same token works for every call. " +
@@ -202,22 +220,30 @@ class ClientGate(
             "unauthorized: this client id was already approved in this session and must send its session token " +
                 "(Authorization: Bearer <bekon_session_token>). The token was handed out in the FIRST initialize response " +
                 "(approved, or approval_pending in error.data) and in its X-Bekon-Token header; the id alone never gets it again. " +
-                "If you lost it, ask the owner to tap 'Disconnect agent' or Stop and Start, then initialize again."
+                "If you lost it, call initialize again WITHOUT a token: the owner gets a new Allow prompt for the same id " +
+                "(the new token replaces the old one). The owner can also tap 'Disconnect agent' (pill menu or the Bekon card)."
         const val INVALID_TOKEN =
-            "unauthorized: invalid or expired session token. Tokens end when the session stops or another agent is approved. " +
+            "unauthorized: invalid or expired session token. Tokens end when the owner taps 'Disconnect agent' or 'Stop', " +
+                "or another agent is approved. " +
                 "Call initialize again WITHOUT a token (with your X-Bekon-Client-Id) so the owner can approve you, then use the new token."
         const val TOKEN_ISSUED =
             "Approved by the owner. Keep sending 'Authorization: Bearer <bekon_session_token>' (or header X-Bekon-Token) " +
                 "together with X-Bekon-Client-Id on EVERY request of this session. The token is valid only until the session stops " +
                 "or another agent is approved; after that you get 401 and must initialize again without a token."
         /** For agents whose every tool call is a new process (no shared memory). */
+        /** Where the token is, in one place: shared by the guide, the instructions and the errors. */
+        const val TOKEN_CONTRACT =
+            "Token contract: every initialize answer carries bekon_session_token, also in the X-Bekon-Token response " +
+                "header. APPROVED (the owner tapped Allow within the ~10 s wait, or you polled after Allow): " +
+                "result.bekon_session_token with result.approval = 'approved'. PENDING: error.code -32002 with " +
+                "error.data.bekon_session_token. Agents must handle both shapes."
         const val STATELESS_INSTRUCTIONS =
             "Stateless agents (every call is a new process): generate your uniqueId ONCE and save it to a file/config; the " +
-                "FIRST initialize response always carries bekon_session_token (in result when approved, in error.data when " +
-                "approval_pending): save it at once, before anything else. Never mint a new id per call (each new id is a new " +
+                "FIRST initialize response always carries bekon_session_token (result.bekon_session_token when approved, " +
+                "error.data.bekon_session_token when approval_pending, and the X-Bekon-Token header): save it at once, before anything else. Never mint a new id per call (each new id is a new " +
                 "owner prompt). While pending, repeat initialize with the saved id + token until approval=approved. Later, call " +
-                "session_info with the saved id + token (never prompts) to check the session; only if it says invalid, " +
-                "initialize again WITHOUT a token."
+                "session_info with the saved id + token (never prompts) to check the session; only if it says invalid (or you " +
+                "lost the token), initialize again WITHOUT a token: the owner gets a new Allow prompt."
         private val SHORTCUT_INSTRUCTIONS: String =
             if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "" else (
                 " After you connect, call shortcuts before hunting through the home screen. " +
@@ -230,7 +256,7 @@ class ClientGate(
             "Always identify yourself at the start with a stable uniqueId: header X-Bekon-Client-Id on every request and " +
                 "clientInfo.uniqueId in initialize. The first initialize answers within ~10 s and ALWAYS carries " +
                 "bekon_session_token (also the X-Bekon-Token header): either approved, or error code -32002 approval_pending " +
-                "with the token in error.data while the owner decides. Save the token, then send 'Authorization: Bearer <token>' " +
+                "with the token in error.data while the owner decides. " + TOKEN_CONTRACT + " Save the token, then send 'Authorization: Bearer <token>' " +
                 "on every later request (while pending: repeat initialize with it every 3-5 s until approval=approved). Tokens are per session and are never remembered: each new session needs a new approval. " +
                 "Only ONE agent can be connected at a time: a second id must be approved by the owner as a replacement, which revokes " +
                 "the previous agent's token. " + STATELESS_INSTRUCTIONS + (if (pro.potoki.bekon.agent.BuildConfig.GUIDANCE_MODE) "" else SHORTCUT_INSTRUCTIONS)

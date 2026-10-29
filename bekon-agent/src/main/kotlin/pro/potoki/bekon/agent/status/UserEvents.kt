@@ -30,6 +30,22 @@ object UserEvents {
 
     fun pending(): Boolean = synchronized(lock) { queue.isNotEmpty() }
 
+    /** Agent session counter: bumped on every new session token / Disconnect agent / Stop. */
+    @Volatile var session = 0L; private set
+
+    /**
+     * A new agent session starts (token issued or revoked, service started/stopped): events from the previous
+     * session (e.g. a cancel_all 'agent disconnected') are dropped so they are never delivered to the new session.
+     */
+    fun newSession() {
+        synchronized(lock) {
+            queue.clear()
+            session++
+            seq++
+            lock.notifyAll()
+        }
+    }
+
     fun drain(): List<Event> = synchronized(lock) { queue.toList().also { queue.clear() } }
 
     fun json(events: List<Event>): JsonArray = buildJsonArray {

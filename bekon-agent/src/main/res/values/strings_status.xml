@@ -65,4 +65,12 @@
     <string name="cue_scroll_up">Scroll up</string>
     <string name="cue_scroll_left">Scroll left</string>
     <string name="cue_scroll_right">Scroll right</string>
+    <string name="pill_disconnect_agent">Disconnect agent</string>
+    <string name="pill_stop_bekon">Stop Bekon (end screen sharing)</string>
+    <string name="disconnect_agent">Disconnect agent</string>
+    <string name="disconnect_agent_done">Agent disconnected. Screen sharing and the link stay on.</string>
+    <string name="conn_link_changed">New link: links you gave before no longer work. Send this one to your agent.</string>
+    <string name="access_reconnect_title">«%1$s» asks to connect again</string>
+    <string name="access_reconnect_message">«%1$s» is already connected but lost its key and asks again (from %2$s). Allow gives it a new key; the old one stops working.</string>
+    <string name="access_overlay_hint">Bekon: an agent asks for access</string>
 </resources>

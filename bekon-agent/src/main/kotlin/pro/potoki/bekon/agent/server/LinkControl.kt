@@ -509,7 +509,7 @@ class LinkControl(
             val st = pro.potoki.bekon.agent.status.AgentStatus.apply(req)
             // Soft: GestureOverlay class-init needs a real Looper (not available in JVM unit tests).
             val overlay = try {
-                pro.potoki.bekon.agent.device.touch.GestureOverlay.canShowStatus()
+                pro.potoki.bekon.agent.status.StatusSurface.onScreen(pro.potoki.bekon.agent.status.StatusSurface.current())
             } catch (_: Throwable) { false }
             val ctx = try { pro.potoki.bekon.agent.BekonApp.appContext } catch (_: Throwable) { null }
             if (ctx != null) {

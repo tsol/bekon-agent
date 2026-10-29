@@ -610,11 +610,11 @@ private fun SettingsMenuButton() {
                 onClick = { open = false; pro.potoki.bekon.agent.ui.SourceCode.downloadZip(ctx) },
             )
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.forget_agents)) },
+                text = { Text(stringResource(R.string.disconnect_agent)) },
                 onClick = {
                     open = false
                     SessionService.revokeAgents()
-                    Toast.makeText(ctx, ctx.getString(R.string.forget_agents_done), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, ctx.getString(R.string.disconnect_agent_done), Toast.LENGTH_SHORT).show()
                 },
             )
             DropdownMenuItem(

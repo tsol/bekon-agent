@@ -68,6 +68,9 @@ class SessionService : Service() {
         @Volatile var instance: SessionService? = null
             private set
 
+        /** Last public URL in this process (kept across Stop/Start) to tell the owner when the quick-tunnel link changed. */
+        @Volatile private var lastUrl: String? = null
+
         private val _state = MutableStateFlow(HomeState())
         val state: StateFlow<HomeState> = _state.asStateFlow()
 
@@ -87,10 +90,20 @@ class SessionService : Service() {
             context.startService(i)
         }
 
-        /** Owner action: drop the connected agent and its session token; it must be approved again. */
+        /**
+         * Owner action "Disconnect agent": void the agent's session token and drop the agent, its status and hints.
+         * Screen sharing (MediaProjection), the local server and the tunnel (so the link/URL) stay up: a new agent,
+         * or the same one, connects again with a new Allow.
+         */
         fun revokeAgents() {
+            try { pro.potoki.bekon.agent.status.UserEvents.stopCoaching?.invoke() } catch (_: Exception) {}
+            try { pro.potoki.bekon.agent.coach.CoachOverlay.clear() } catch (_: Throwable) {}
+            try { pro.potoki.bekon.agent.device.touch.GestureOverlay.clearCoach() } catch (_: Throwable) {}
+            try { pro.potoki.bekon.agent.status.AgentStatus.clear() } catch (_: Throwable) {}
             instance?.gate?.reset()
             pro.potoki.bekon.agent.access.AgentConnections.clear()
+            try { pro.potoki.bekon.agent.BekonApp.appContext?.let { pro.potoki.bekon.agent.status.AgentAlert.clear(it) } } catch (_: Throwable) {}
+            Log.i(TAG, "agent disconnected by the owner (screen sharing and tunnel kept)")
         }
 
         fun setPaused(paused: Boolean) {
@@ -197,6 +210,7 @@ class SessionService : Service() {
 
     private fun startSession() {
         if (_state.value.phase == SessionPhase.SERVING) return
+        pro.potoki.bekon.agent.status.UserEvents.newSession()
         _state.value = _state.value.copy(phase = SessionPhase.STARTING, error = null)
         updateNotification(statusText())
         val ex = DeviceExecutor(applicationContext)
@@ -275,8 +289,14 @@ class SessionService : Service() {
                 }
             },
             onUrl = { url ->
+                // Quick tunnels get a new random URL after a tunnel restart: links already given to an agent are dead.
+                val prev = lastUrl
+                lastUrl = url
+                val changed = prev != null && prev != url
+                if (changed) Log.w(TAG, "tunnel URL changed: the old link no longer works; the card shows the new one")
                 pro.potoki.bekon.agent.handoff.Handoff.currentUrl = url
-                _state.value = _state.value.copy(publicUrl = url, phase = SessionPhase.SERVING)
+                _state.value = _state.value.copy(publicUrl = url, phase = SessionPhase.SERVING,
+                    linkChanged = changed || _state.value.linkChanged)
                 updateNotification(statusText())
             },
             onSessionDown = { reason ->
@@ -327,7 +347,7 @@ class SessionService : Service() {
 
     private fun stopSession() {
         probeThread?.interrupt(); probeThread = null; probeFailed = false
-        pro.potoki.bekon.agent.access.AgentConnections.clear()
+        pro.potoki.bekon.agent.access.AgentConnections.resetAll()
         gate?.reset()
         Log.i(TAG, "stopSession")
         try { pro.potoki.bekon.agent.status.UserEvents.stopCoaching?.invoke() } catch (_: Exception) {}

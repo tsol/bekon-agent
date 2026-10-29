@@ -312,6 +312,8 @@ class LinkControlTest {
         val wait = links.handle("GET", "/link/wait", mapOf("ticket" to ticket), ua = "ChatGPT-User/1.0")!!
         assertFalse(wait.html!!.contains(mcpTok))
         assertFalse(wait.html!!.contains("/s/$mcpTok"))
-        assertEquals(1, asks.get())
+        // Lost-token recovery is an explicit owner prompt (never a silent re-issue); the old token is replaced.
+        assertEquals(2, asks.get())
+        assertTrue(g.tokenFor("victim") != mcpTok)
     }
 }

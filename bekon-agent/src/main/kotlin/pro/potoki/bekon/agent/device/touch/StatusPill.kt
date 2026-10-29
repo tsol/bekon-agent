@@ -479,8 +479,12 @@ object StatusPill {
                     if (tg != null && guide) {
                         var tl = tg[0]; var tt = tg[1]; val tr = tg[2]; var tb = tg[3]
                         val h0 = tb - tt
-                        if (tt < safeTop) { tt = safeTop; tb = maxOf(tb, tt + h0 * 0.22f) }
-                        if (tb > safeBottom) { tb = safeBottom; tt = minOf(tt, tb - h0 * 0.22f) }
+                        // A target in a system bar (Home/Back, status icons) stays at its true place (the ring is
+                        // clipped by the bar); only content scrolled partly under an edge is squashed.
+                        if (!pro.potoki.bekon.agent.coach.TargetMapping.inSystemBar(tt, tb, safeTop, safeBottom)) {
+                            if (tt < safeTop) { tt = safeTop; tb = maxOf(tb, tt + h0 * 0.22f) }
+                            if (tb > safeBottom) { tb = safeBottom; tt = minOf(tt, tb - h0 * 0.22f) }
+                        }
                         val gap = 3f * d; val thick = 8f * d
                         val ring = floatArrayOf(tl - gap - thick, tt - gap - thick, tr + gap + thick, tb + gap + thick)
                         val (outer, axis) = S.ringPocket(ring, 12f * d, floatArrayOf(r.left, r.top, r.right, r.bottom), 14f * d, 5f * d, 2.2f * d, 7f * d)

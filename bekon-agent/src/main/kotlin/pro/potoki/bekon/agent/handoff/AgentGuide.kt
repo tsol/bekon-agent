@@ -53,10 +53,19 @@ curl -s $mcp -H 'Content-Type: application/json' -H '$hdr: my-agent-1' \
   2. While pending: repeat `initialize` every 3-5 s with the SAME id and `Authorization: Bearer <token>`
      (each poll answers within ~2 s) until `result.approval = "approved"`. Tell the human to tap Allow.
   3. Send `Authorization: Bearer <token>` (or `X-Bekon-Token`) with `$hdr` on EVERY later request.
-  - An approved id WITHOUT its token gets HTTP 401 and never receives the token again (the id is not a secret).
+  - **Token contract (handle BOTH shapes):** approved -> `result.bekon_session_token` (this happens on the FIRST call
+    when the owner taps Allow during the ~10 s wait, and on every poll after Allow); pending -> `error.data.bekon_session_token`
+    (`error.code = -32002`). Both also in the `X-Bekon-Token` response header.
+  - Lost the token? `initialize` again WITHOUT a token and the same id: the owner gets a new Allow prompt
+    ("asks to connect again"); Allow gives a NEW token and the old one stops working. The id alone never gets a token silently.
   - "access declined" (Deny, or no answer in ~2 min): ask the human, then start again at step 1.
-  - The token ends when the session stops or the owner approves another agent; then start again at step 1.
+  - The token ends when the owner taps **Disconnect agent** (pill menu or the Bekon card; screen sharing and the link
+    stay up) or **Stop** (everything stops, the link dies), or approves another agent; then start again at step 1.
     Nothing is remembered between sessions.
+- **Tunnel errors:** HTTP 530 / Cloudflare error 1033 means this link is dead (Bekon was stopped or its tunnel restarted
+  and got a NEW URL). Stop calling it and ask the owner for the new link (the Bekon card shows it, with a QR).
+- **Calling tools:** tools are called via JSON-RPC method `tools/call` with params `{name, arguments}`. A tool name used
+  as the JSON-RPC method (e.g. method `session_info`) is an error.
 - **Stateless agents** (each tool call is a new process): generate your id ONCE and save it with the token;
   never mint a new id per call (each new id = a new owner prompt). To check a saved session, call tool
   `session_info` with the saved id + token: it never prompts and says alive / pending / invalid.
@@ -91,10 +100,12 @@ device_setup_guide, open_setup_screen, connection_info, user_events.
   replaced agent gets "replaced by another agent" until the session restarts.
 
 ## The human can talk back (status pill menu)
-- Tapping the status pill opens: Back to Bekon / I changed my mind / Change the goal / Cancel everything.
+- Tapping the status pill opens: Back to Bekon / I changed my mind / Change the goal / Cancel everything /
+  Disconnect agent (ends only your session: token void) / Stop Bekon (end screen sharing; the link dies).
 - These arrive as userEvents in wait_for_change / wait_for_script (they return early) and via `user_events`:
   back_to_app, changed_mind (hints were cleared: don't redraw the same hint), new_goal {text} (follow it),
-  cancel_all (stop; session paused or stopped).
+  cancel_all (stop; session paused, agent disconnected, or Bekon stopped). Events belong to one agent session: a new
+  token never receives events from an earlier session.
 - The pill can be dragged or swiped away by the human; it never covers your coach marks.
 
 ## Coaching loop (helping a human do it themselves)
@@ -157,12 +168,20 @@ short captions). The human does every tap, swipe and keystroke themselves. There
 ## Connect (MCP, streamable HTTP)
 - Endpoint: $mcp (JSON-RPC 2.0 over HTTP POST). Send header `$hdr: <your-stable-id>` on every request and
   the same id as `params.clientInfo.uniqueId` in `initialize`.
-- The first `initialize` ALWAYS returns `bekon_session_token` (also the `X-Bekon-Token` header): in `result`
-  when approved, or in `error.data` with `error.code = -32002` "approval_pending" while the owner decides.
+- The first `initialize` ALWAYS returns `bekon_session_token` (also the `X-Bekon-Token` header).
+  **Token contract (handle BOTH shapes):** approved -> `result.bekon_session_token` with `result.approval = "approved"`
+  (happens on the first call when the owner taps Allow within the ~10 s wait); pending -> `error.code = -32002`
+  "approval_pending" with `error.data.bekon_session_token`.
   Save it at once; while pending repeat `initialize` with the same id + `Authorization: Bearer <token>` every
   3-5 s until `result.approval = "approved"`. Then send that header on every request.
 - Stateless agents: save your id + token to a file between runs (never a new id per call); `session_info`
   (never prompts) says alive / pending / invalid.
+- Lost the token? `initialize` again WITHOUT a token, same id: the owner gets a new Allow prompt; Allow gives a new
+  token (the old one stops working). Nothing is ever re-issued silently.
+- Tools are called via JSON-RPC method `tools/call` with params `{name, arguments}` (never the tool name as the method).
+- The owner can tap **Disconnect agent** (ends your session only; the link stays) or **Stop** (the link dies).
+- HTTP 530 / Cloudflare error 1033 = this link is dead (Bekon stopped or its tunnel restarted with a NEW URL):
+  stop calling it and ask the owner for the new link (shown on the Bekon card, with a QR).
 
 ## Device language
 - UI locale `${pro.potoki.bekon.agent.status.AgentStatus.localeTag()}` (${pro.potoki.bekon.agent.status.AgentStatus.languageName()}). Write hints in this language.
@@ -171,13 +190,16 @@ short captions). The human does every tap, swipe and keystroke themselves. There
 ${Handoff.GUIDANCE_TOOLS}, connection_info, session_info, device_setup_guide, current_screen_fingerprint, nav_mark.
 
 ## Hint loop
-1. `ocr_screen` or `find_text` {text, contains:true} to locate the target on the CURRENT screen.
+1. `ocr_screen` or `find_text` {text, contains:true} to locate the target on the CURRENT screen (`query` is accepted as an alias of `text`).
 2. Show it: `find_text` draw=true, `som_marks` (numbered marks), `coach_draw` (screen pixels), or `guidance_step` (caption + Next).
 3. `wait_for_change`, then look again and show the next hint; `coach_clear` when done.
 - Below the fold: `find_text` acrossHistory=true returns `scrollHint`; show `coach_scroll` {direction:"down"} (bouncing arrow + caption), `wait_for_change`, then `find_text` again.
 - Other home-screen page: `coach_scroll` {direction:"right"} for the next page, "left" for the previous one. direction is always where the content to reach is (the arrow points there), never the finger movement.
 - `find_text` draw=true puts a short caption next to the frame ("Your turn: tap …"); pass `caption` to word it yourself (UI language, ≤ 5 words).
 - If a result has `overlayHidden:true`, this screen blocks overlays: describe the target in words; a hint notification was posted.
+- Coordinates are screen pixels of the full screenshot (e.g. 1080x2340, status bar and navigation bar included). Hints are
+  drawn in an app overlay that Android keeps BELOW the system bars: a target inside the navigation bar (Home/Back) is marked
+  with an arrow pointing at it from just above the bar, plus the part of the circle that is visible.
 
 ## Server instructions (identical to initialize.instructions)
 ${SERVER_INSTRUCTIONS}
@@ -272,7 +294,7 @@ Allow: /s/
     fun mcpGetHint(baseUrl: String?): String {
         val (_, mcp, link) = urls(baseUrl)
         return "Bekon MCP endpoint: POST JSON-RPC 2.0 here ($mcp) with header ${ClientGate.HEADER}: <stable-id>; " +
-            "save bekon_session_token from your first initialize (result, or error.data while approval_pending) and send Authorization: Bearer <it> on every request. " +
+            "save bekon_session_token from your first initialize (result.bekon_session_token when approved, error.data.bekon_session_token while approval_pending) and send Authorization: Bearer <it> on every request. " +
             "Web-only chatbot? Do NOT stop — open $link instead (${if (GUIDANCE) "link guidance" else "link control"}, no POST)."
     }
 }

@@ -4,6 +4,9 @@
     <!-- Sideload build only: the "Stop optimizing battery?" dialog. The Play build has no
          REQUEST_IGNORE_BATTERY_OPTIMIZATIONS; it only points to the battery settings screens. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Sideload build only: the Allow/Deny access prompt as a full-screen intent (call-style) while Bekon is in the
+         background. The Play build uses the "Display over other apps" overlay prompt instead (FSI is restricted on Play). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <queries>
         <intent>
             <action android:name="android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />

@@ -155,10 +155,16 @@ class LocalServerTest {
         val alive = rpc(info, tok)
         assertTrue(alive, alive.contains("\"alive\":true") && !alive.contains(tok))
         val again = rpc(init, tok)
-        assertTrue(again, again.contains("\"reconnected\"") && !again.contains(tok))
+        // Token contract: every approved initialize result carries bekon_session_token (here: echoed back to its holder).
+        assertTrue(again, again.contains("\"reconnected\"") && again.contains("\"bekon_session_token\":\"$tok\""))
+        assertTrue("one prompt so far (asks=${asks.get()})", asks.get() == 1)
+        // Lost-token recovery: the id alone never gets the OLD token back; the owner is asked again and Allow issues a new one.
         val idOnly = rpc(init)
-        assertTrue("id-only init gets no token: $idOnly", !idOnly.contains(tok) && idOnly.contains("unauthorized"))
-        assertTrue("one prompt total (asks=${asks.get()})", asks.get() == 1)
+        val tok2 = Regex("\"bekon_session_token\":\"([A-Za-z0-9_-]+)\"").find(idOnly)!!.groupValues[1]
+        assertTrue("id-only init never gets the old token: $idOnly", !idOnly.contains(tok) && tok2 != tok)
+        assertTrue("re-prompted (asks=${asks.get()})", asks.get() == 2)
+        val stale = rpc(info, tok)
+        assertTrue(stale, stale.contains("\"alive\":false"))
         client.close(); srv.stop()
     }
 
@@ -193,10 +199,15 @@ class LocalServerTest {
         assertTrue(tl, tl.contains("approval_pending") && !tl.contains("\"tools\""))
         answerRef.set(true)
         Thread.sleep(50)
-        val r2 = call(tok).bodyAsText()
+        val r2c = call(tok)
+        val r2 = r2c.bodyAsText()
         assertTrue(r2, r2.contains("\"approval\":\"approved\""))
+        assertTrue("approved result carries the token: $r2", r2.contains("\"bekon_session_token\":\"$tok\"") && r2c.headers["X-Bekon-Token"] == tok)
+        // Id alone after approval: a NEW owner prompt (here: Deny) -- never the token.
+        answerRef.set(false)
         val r3 = call(null)
-        assertTrue("id alone after approval: 401, no token", r3.status.value == 401 && !r3.bodyAsText().contains(tok))
+        val b3 = r3.bodyAsText()
+        assertTrue("id alone after approval: no token: $b3", !b3.contains(tok) && b3.contains("access declined"))
         client.close(); srv.stop()
     }
 

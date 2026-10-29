@@ -65,4 +65,12 @@
     <string name="cue_scroll_up">Прокрутите вверх</string>
     <string name="cue_scroll_left">Прокрутите влево</string>
     <string name="cue_scroll_right">Прокрутите вправо</string>
+    <string name="pill_disconnect_agent">Отключить агента</string>
+    <string name="pill_stop_bekon">Остановить Bekon (выключить показ экрана)</string>
+    <string name="disconnect_agent">Отключить агента</string>
+    <string name="disconnect_agent_done">Агент отключён. Показ экрана и ссылка остаются включёнными.</string>
+    <string name="conn_link_changed">Новая ссылка: ссылки, которые вы давали раньше, больше не работают. Отправьте агенту эту.</string>
+    <string name="access_reconnect_title">«%1$s» просит подключиться снова</string>
+    <string name="access_reconnect_message">«%1$s» уже подключён, но потерял ключ и просит снова (адрес %2$s). «Разрешить» выдаст новый ключ; старый перестанет работать.</string>
+    <string name="access_overlay_hint">Bekon: агент просит доступ</string>
 </resources>

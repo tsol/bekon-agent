@@ -31,8 +31,8 @@ class AccessPromptActivity : Activity() {
         val clientId = intent.getStringExtra(EXTRA_CLIENT) ?: ""
         val replacing = intent.getStringExtra(EXTRA_REPLACING)
         AlertDialog.Builder(this)
-            .setTitle(getString(if (replacing != null) R.string.access_replace_title else R.string.access_title))
-            .setMessage(if (replacing != null) getString(R.string.access_replace_message, replacing, clientId) else getString(R.string.access_message, clientId, ip))
+            .setTitle(titleOf(this, clientId, replacing))
+            .setMessage(messageOf(this, clientId, ip, replacing))
             .setCancelable(false)
             .setPositiveButton(R.string.access_allow) { _, _ -> answer(token, true) }
             .setNegativeButton(R.string.access_deny) { _, _ -> answer(token, false) }
@@ -61,7 +61,9 @@ class AccessPromptActivity : Activity() {
         const val EXTRA_TOKEN = "token"
         private const val EXTRA_IP = "ip"
         private const val EXTRA_CLIENT = "clientId"
-        private const val CHANNEL = "bekon_access"
+        /** v2: re-created with sound + vibration + public lock-screen visibility (channel settings are immutable). */
+        private const val CHANNEL = "bekon_access_v2"
+        private const val OLD_CHANNEL = "bekon_access"
         private const val NOTE_ID = 42
         /** How long the prompt waits for the owner (ClientGate runs it on its own thread; requests poll it). */
         private const val WAIT_SECONDS = 120L
@@ -99,11 +101,31 @@ class AccessPromptActivity : Activity() {
                 replacing?.let { putExtra(EXTRA_REPLACING, it) }
             }
             notify(context, intent, ip, p, replacing)
+            val fg = try { pro.potoki.bekon.agent.status.AgentAlert.inForeground() } catch (_: Throwable) { false }
+            val ui = AccessSurface.plan(fg, AccessSurface.canOverlay(context))
+            android.util.Log.i("BekonAccess", "access prompt: foreground=$fg ui=$ui")
+            if (ui == AccessSurface.Ui.OVERLAY && AccessOverlay.show(
+                    context, p.token, titleOf(context, p.clientId, replacing), messageOf(context, p.clientId, ip, replacing),
+                    context.getString(R.string.access_allow), context.getString(R.string.access_deny),
+                )) return
             try {
                 context.startActivity(intent)
             } catch (e: Exception) {
                 // The notification is the fallback if the activity start is blocked.
             }
+        }
+
+        /** A reconnect (same id lost its token) reads differently from a replacement of another agent. */
+        fun titleOf(ctx: Context, clientId: String, replacing: String?): String = when (replacing) {
+            null -> ctx.getString(R.string.access_title)
+            clientId -> ctx.getString(R.string.access_reconnect_title, clientId)
+            else -> ctx.getString(R.string.access_replace_title)
+        }
+
+        fun messageOf(ctx: Context, clientId: String, ip: String, replacing: String?): String = when (replacing) {
+            null -> ctx.getString(R.string.access_message, clientId, ip)
+            clientId -> ctx.getString(R.string.access_reconnect_message, clientId, ip)
+            else -> ctx.getString(R.string.access_replace_message, replacing, clientId)
         }
 
         /** Nobody is waiting any more: drop the prompt after a grace period unless a retry joined it. */
@@ -124,24 +146,37 @@ class AccessPromptActivity : Activity() {
             } ?: return
             p.allowed.set(ok)
             p.latch.countDown()
-            current?.get()?.let { appCtx -> closeUi(appCtx.applicationContext) }
+            (current?.get()?.applicationContext ?: pro.potoki.bekon.agent.BekonApp.appContext)?.let { closeUi(it) }
         }
 
         fun deliverFromNotification(context: Context, token: String, ok: Boolean) {
             deliver(token, ok)
             context.getSystemService(NotificationManager::class.java).cancel(NOTE_ID)
+            AccessOverlay.hide(context)
         }
 
         private fun closeUi(context: Context) {
             context.getSystemService(NotificationManager::class.java).cancel(NOTE_ID)
+            AccessOverlay.hide(context)
             if (pending.isEmpty()) handler.post { current?.get()?.finish() }
         }
 
         private fun notify(context: Context, intent: Intent, ip: String, p: Pending, replacing: String?) {
             val nm = context.getSystemService(NotificationManager::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                try { nm.deleteNotificationChannel(OLD_CHANNEL) } catch (_: Throwable) {}
                 nm.createNotificationChannel(
-                    NotificationChannel(CHANNEL, context.getString(R.string.access_channel), NotificationManager.IMPORTANCE_HIGH),
+                    NotificationChannel(CHANNEL, context.getString(R.string.access_channel), NotificationManager.IMPORTANCE_HIGH).apply {
+                        enableVibration(true)
+                        vibrationPattern = longArrayOf(0, 300, 200, 300)
+                        lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                        setSound(
+                            android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION),
+                            android.media.AudioAttributes.Builder()
+                                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_REQUEST)
+                                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build(),
+                        )
+                    },
                 )
             }
             val pi = PendingIntent.getActivity(
@@ -153,11 +188,11 @@ class AccessPromptActivity : Activity() {
                 Intent(context, AccessActionReceiver::class.java).setAction(a).putExtra(EXTRA_TOKEN, p.token),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            val text = if (replacing != null) context.getString(R.string.access_replace_message, replacing, p.clientId)
+            val text = if (replacing != null) messageOf(context, p.clientId, ip, replacing)
                 else context.getString(R.string.access_note_text, p.clientId, ip)
             val note = NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle(if (replacing != null) context.getString(R.string.access_replace_title) else context.getString(R.string.access_note_title, p.clientId))
+                .setContentTitle(if (replacing != null) titleOf(context, p.clientId, replacing) else context.getString(R.string.access_note_title, p.clientId))
                 .setContentText(text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -167,6 +202,10 @@ class AccessPromptActivity : Activity() {
                 .addAction(0, context.getString(R.string.access_allow), action(AccessActionReceiver.ACTION_ALLOW, 1))
                 .addAction(0, context.getString(R.string.access_deny), action(AccessActionReceiver.ACTION_DENY, 2))
                 .setAutoCancel(true)
+                .setOngoing(true)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setTimeoutAfter((WAIT_SECONDS * 1000) + PROMPT_GRACE_MS)
                 .build()
             nm.notify(NOTE_ID, note)
         }

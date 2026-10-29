@@ -76,6 +76,8 @@ data class HomeState(
     val readOnly: Boolean = false,
     val error: String? = null,
     val stepIndex: Int = 0,
+    /** The tunnel restarted during this run and got a NEW public URL: the old link is dead, give the agent the new one. */
+    val linkChanged: Boolean = false,
 ) {
     val canStart: Boolean get() = phase == SessionPhase.IDLE
     val isRunning: Boolean get() = phase == SessionPhase.SERVING

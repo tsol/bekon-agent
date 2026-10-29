@@ -282,19 +282,8 @@ object CoachOverlay {
         var shapes: List<Shape> = emptyList()
         var marksAlpha = 1f
 
-        /** Targets partly past the top/bottom edge: clamp to the edge and widen ("smeared on the wall"). */
-        private fun squashed(list: List<Shape>, top: Float, bottom: Float): List<Shape> = list.map { s ->
-            if (s.kind == Shape.Kind.GRID) return@map s
-            val t = minOf(s.y1, s.y2); val b = maxOf(s.y1, s.y2); val h = (b - t).coerceAtLeast(1f)
-            if (t >= top && b <= bottom) return@map s
-            val nt = t.coerceIn(top, bottom); val nb = b.coerceIn(top, bottom)
-            val f = ((nb - nt) / h).coerceIn(0.15f, 1f)
-            val ease = 1f - f * f                       // cartoon ease: barely at first, then flattens
-            val nh = maxOf(nb - nt, h * 0.22f)
-            val ny1 = if (t < top) top else bottom - nh
-            val w = kotlin.math.abs(s.x2 - s.x1); val grow = w * 0.18f * ease
-            s.copy(x1 = minOf(s.x1, s.x2) - grow, x2 = maxOf(s.x1, s.x2) + grow, y1 = ny1, y2 = ny1 + nh)
-        }
+        /** Screen-px shapes -> what this window draws (see [TargetMapping]: system-bar targets stay exact). */
+        private fun squashed(list: List<Shape>, top: Float, bottom: Float): List<Shape> = TargetMapping.map(list, top, bottom)
 
         override fun onDraw(canvas: Canvas) {
             val loc = IntArray(2); getLocationOnScreen(loc)

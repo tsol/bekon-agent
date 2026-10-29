@@ -168,10 +168,35 @@ class McpHandler(
                 "Build every hint from the CURRENT screen, never from remembered layouts. Never ask the human to type 'done'."
         const val READ_ONLY = "device is in read-only mode so this action was declined."
         const val AUTH_INFO = "Session token: send 'Authorization: Bearer <bekon_session_token>' (or X-Bekon-Token) plus X-Bekon-Client-Id on every request; " +
-            "the token is handed out in your first initialize response (approved, or approval_pending in error.data), becomes valid when the owner taps Allow, " +
-            "and ends with the session or when another agent is approved."
+            "the token is handed out in every initialize response (result.bekon_session_token when approved, error.data.bekon_session_token " +
+            "when approval_pending, plus the X-Bekon-Token header), becomes valid when the owner taps Allow, " +
+            "and ends when the owner taps Disconnect agent or Stop, or when another agent is approved. Lost it? initialize again without a token: the owner gets a new Allow prompt."
         private val ISSUED_TOKEN = io.ktor.util.AttributeKey<String>("bekon-issued-token")
         const val SESSION_INFO = "session_info"
+        const val TOOLS_CALL_HINT = "Tools are called via JSON-RPC method tools/call with params {name, arguments}, e.g. " +
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"session_info\",\"arguments\":{}}}. " +
+            "JSON-RPC methods: initialize, tools/list, tools/call, ping."
+        private val RPC_METHODS = setOf("initialize", "notifications/initialized", "ping", "tools/list", "tools/call")
+
+        /** Error for an unknown JSON-RPC method; a tool name used as a method gets the tools/call shape. */
+        fun unknownMethodMessage(method: String, tools: Set<String>): String =
+            if (method in tools) "unknown method $method: '$method' is a tool, not a JSON-RPC method. $TOOLS_CALL_HINT"
+            else "unknown method $method. $TOOLS_CALL_HINT"
+
+        /** Error for an unknown tool name in tools/call; a JSON-RPC method used as a tool name gets a hint. */
+        fun unknownToolMessage(name: String, tools: Set<String>): String =
+            if (name in RPC_METHODS) "unknown tool $name: '$name' is a JSON-RPC method, not a tool; send it as {\"method\":\"$name\"}. $TOOLS_CALL_HINT"
+            else "unknown tool $name. Call tools/list for the available tool names. $TOOLS_CALL_HINT"
+
+        /** find_text target text: `text`, or the common aliases `query` / `q`. */
+        fun textArg(args: JsonObject): String =
+            listOf("text", "query", "q").firstNotNullOfOrNull { k -> (args[k] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() } } ?: ""
+
+        /** Log line for POST /mcp: method and tool name only. */
+        fun callLogLine(method: String, params: JsonElement?): String {
+            val tool = if (method == "tools/call") ((params as? JsonObject)?.get("name") as? JsonPrimitive)?.content?.take(64) else null
+            return "POST /mcp method=${method.take(64)}" + (tool?.let { " tool=$it" } ?: "")
+        }
         const val APPROVAL_HEADER = "X-Bekon-Approval"
         /** Tools that inject input / navigate — forbidden in guidance (playStore) mode. */
         val AUTONOMOUS_TOOLS = setOf(
@@ -192,6 +217,14 @@ class McpHandler(
 
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** Tool names currently offered (for hints on wrongly-shaped calls). */
+    private val toolNames: Set<String> by lazy {
+        (toolsList as kotlinx.serialization.json.JsonArray).mapNotNull { ((it as? JsonObject)?.get("name") as? JsonPrimitive)?.content }
+            .filter { !GUIDANCE || it !in GUIDANCE_HIDDEN }.toSet() + SESSION_INFO
+    }
+    fun unknownMethodMessage(method: String): String = unknownMethodMessage(method, toolNames)
+    fun unknownToolMessage(name: String): String = unknownToolMessage(name, toolNames)
     private val scripts by lazy { CoachScriptRunner(executor, coach) }
     init { pro.potoki.bekon.agent.status.UserEvents.stopCoaching = { scripts.run?.takeIf { it.status == "running" }?.let { scripts.stop() } } }
 
@@ -376,7 +409,11 @@ class McpHandler(
         val token = ClientGate.tokenFrom(call.request.headers["Authorization"], call.request.headers[ClientGate.TOKEN_HEADER])
         // session_info is answered BEFORE the gate: read-only, token-validated, never prompts the owner or issues a token.
         if (req.method == "tools/call" && ((req.params as? JsonObject)?.get("name") as? JsonPrimitive)?.content == SESSION_INFO) {
-            val st = gate?.status(clientIdOf(call, req), token) ?: ClientGate.Status.ALIVE
+            val cid = clientIdOf(call, req)
+            logCall(req.method, req.params)
+            val st = gate?.status(cid, token) ?: ClientGate.Status.ALIVE
+            // A live agent checking its session is activity too (keeps the card/pill "connected").
+            if (st == ClientGate.Status.ALIVE && cid != null) pro.potoki.bekon.agent.access.AgentConnections.seen(cid)
             val info = sessionInfoJson(st)
             respondJson(call, JsonRpcResponse(id = id, result = buildJsonObject {
                 put("content", buildJsonArray { add(buildJsonObject { put("type", "text"); put("text", info.toString()) }) })
@@ -385,6 +422,7 @@ class McpHandler(
             return
         }
         var reconnected = false
+        logCall(req.method, req.params)
         when (val d = gate?.check(clientIdOf(call, req), clientIp(call), token)) {
             is ClientGate.Decision.Reject -> {
                 if (d.status == 401) {
@@ -413,7 +451,10 @@ class McpHandler(
                 // A valid token on initialize = reconnect of the SAME approved session (no prompt, nothing new issued).
                 reconnected = d.issuedToken == null && token != null
                 call.response.headers.append(APPROVAL_HEADER, "approved")
-                d.issuedToken?.let {
+                // initialize ALWAYS carries the session token (result.bekon_session_token + X-Bekon-Token header):
+                // just issued (Allow tapped within the wait) or echoed back to the poller that already holds it.
+                val tok = d.issuedToken ?: token?.takeIf { req.method == "initialize" }?.trim()
+                tok?.let {
                     call.response.headers.append(ClientGate.TOKEN_HEADER, it)
                     call.attributes.put(ISSUED_TOKEN, it)
                 }
@@ -534,8 +575,13 @@ class McpHandler(
                     respondJson(call, JsonRpcResponse(id = id, result = toolResult))
                 }
             }
-            else -> respondJson(call, JsonRpcResponse(id = id, error = errElement("unknown method ${req.method}")))
+            else -> respondJson(call, JsonRpcResponse(id = id, error = errElement(unknownMethodMessage(req.method))))
         }
+    }
+
+    /** debug logcat: method + tool name only (never params, arguments, ids or tokens). */
+    private fun logCall(method: String, params: JsonElement?) {
+        try { android.util.Log.d("BekonHttp", callLogLine(method, params)) } catch (_: Throwable) { /* JVM unit tests */ }
     }
 
     /** Each tool returns a JsonObject payload (for structuredContent) OR a screenshot object. */
@@ -854,8 +900,8 @@ class McpHandler(
             }
         }
         "find_text" -> {
-            val q = args.str("text").trim()
-            if (q.isEmpty()) throw IllegalArgumentException("text is required (non-empty)")
+            val q = textArg(args).trim()
+            if (q.isEmpty()) throw IllegalArgumentException("text is required (non-empty); aliases: query, q")
             val contains = args.boolOr("contains") ?: true
             val across = args.boolOr("acrossHistory") ?: false
             val c = coach
@@ -1145,7 +1191,8 @@ class McpHandler(
             val req = pro.potoki.bekon.agent.status.AgentStatus.parse(
                 args.strOr("text"), args.strOr("state"), args.intOr("ttlMs")?.toLong(), args.boolOr("clear"), args.strOr("position"), args.intOr("step"), args.intOr("total"))
             val st = pro.potoki.bekon.agent.status.AgentStatus.apply(req)
-            val overlay = pro.potoki.bekon.agent.device.touch.GestureOverlay.canShowStatus()
+            val surface = pro.potoki.bekon.agent.status.StatusSurface.current()
+            val overlay = pro.potoki.bekon.agent.status.StatusSurface.onScreen(surface)
             val ctx = pro.potoki.bekon.agent.BekonApp.appContext
             if (ctx != null) {
                 if (st == null) pro.potoki.bekon.agent.status.AgentAlert.clear(ctx)
@@ -1164,10 +1211,10 @@ class McpHandler(
                 put("capabilities", pro.potoki.bekon.agent.status.Capabilities.json())
                 put("text", when {
                     st == null -> "status cleared"
-                    overlay -> "status '${st.text}' (${st.state.wire}) shown on the phone in the overlay pill" +
+                    overlay -> "status '${st.text}' (${st.state.wire}) " + pro.potoki.bekon.agent.status.StatusSurface.describe(surface, GUIDANCE) +
                         (if (st.state == pro.potoki.bekon.agent.status.AgentStatus.State.DONE) " and the session notification ('Agent finished')" else "") +
                         (if (st.ttlMs > 0) ", auto-clears in ${st.ttlMs} ms" else ", stays until replaced/cleared or the session stops")
-                    else -> "Accessibility (Gestures) overlay is OFF, so the status '${st.text}' (${st.state.wire}) was shown notification-only: a heads-up 'Agent needs you' notification plus the session notification (the human sees it only if they look at notifications)"
+                    else -> "status '${st.text}' (${st.state.wire}) " + pro.potoki.bekon.agent.status.StatusSurface.describe(surface, GUIDANCE)
                 } + (if (req.truncated) ". Text was truncated to ${pro.potoki.bekon.agent.status.AgentStatus.MAX_CHARS} chars; keep it under ~60." else "") +
                     ". Device language: ${pro.potoki.bekon.agent.status.AgentStatus.language()} — write status text in the human's language.")
             }
@@ -1226,7 +1273,7 @@ class McpHandler(
             if (!removed) throw IllegalArgumentException("no shortcut $id")
             buildJsonObject { put("ok", true); put("text", "removed $id") }
         }
-        else -> throw IllegalArgumentException("unknown tool $name")
+        else -> throw IllegalArgumentException(unknownToolMessage(name))
     }
 
     private val toolsList: JsonElement = buildJsonArray {
@@ -1394,9 +1441,10 @@ class McpHandler(
         )
         tool(
             "find_text",
-            "Find on-screen text (OCR or current snapshot) and optionally draw a highlight/arrow/mark on the first hit. acrossHistory=true searches the in-memory scroll-accumulated OCR store and may return scrollHint (further down/above). User taps; Bekon never taps.",
+            "Find on-screen text (OCR or current snapshot) and optionally draw a highlight/arrow/mark on the first hit. acrossHistory=true searches the in-memory scroll-accumulated OCR store and may return scrollHint (further down/above). The text to find goes in `text` (`query` is accepted as an alias). User taps; Bekon never taps.",
             schema {
                 str("text")
+                str("query", required = false)
                 add("contains", buildJsonObject { put("type", "boolean") }, false)
                 add("acrossHistory", buildJsonObject { put("type", "boolean") }, false)
                 add("draw", buildJsonObject { put("type", "boolean") }, false)

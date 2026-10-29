@@ -133,12 +133,23 @@ private fun ConnectionCard(
                     if (state.sessionActive) StopButton({ onIntent(HomeIntent.Stop) }, Modifier.fillMaxWidth())
                 }
                 ConnState.READY, ConnState.DISCONNECTED -> {
+                    // Quick tunnels get a new URL after a restart: say so, links given before are dead.
+                    if (state.linkChanged && !state.publicUrl.isNullOrBlank()) Text(stringResource(R.string.conn_link_changed),
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
                     if (!state.publicUrl.isNullOrBlank()) ShareButtons(state.publicUrl, onShowQr, { onIntent(HomeIntent.Stop) })
                     else if (state.sessionActive) StopButton({ onIntent(HomeIntent.Stop) }, Modifier.fillMaxWidth())
                 }
                 ConnState.CONNECTED -> {
                     // Play policy: always-visible remote-session indicator with one-tap Stop.
                     Text(stringResource(R.string.conn_connected_body), style = MaterialTheme.typography.bodyMedium)
+                    // Ends only the AGENT session (token void); screen sharing, tunnel and link stay up.
+                    val ctx = LocalContext.current
+                    OutlinedButton(onClick = {
+                        pro.potoki.bekon.agent.session.SessionService.revokeAgents()
+                        Toast.makeText(ctx, ctx.getString(R.string.disconnect_agent_done), Toast.LENGTH_SHORT).show()
+                    }, modifier = Modifier.fillMaxWidth().height(BTN_H), shape = BTN_SHAPE, contentPadding = TIGHT) {
+                        BtnLabel(stringResource(R.string.disconnect_agent))
+                    }
                     // Same grid as the share row: equal-width buttons, Stop in red (always-visible Stop, Play policy).
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         if (state.canShowQr) OutlinedButton(onClick = onShowQr, modifier = Modifier.weight(1f).height(BTN_H), shape = BTN_SHAPE, contentPadding = TIGHT) {

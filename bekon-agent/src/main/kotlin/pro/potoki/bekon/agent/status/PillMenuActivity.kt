@@ -59,11 +59,22 @@ class PillMenuActivity : Activity() {
             SessionService.setPaused(true)
             finish()
         }
-        // Separate, explicit danger action (a checkbox under "Cancel everything" was ambiguous).
-        big(R.string.pill_stop_session) {
+        // Ends only the AGENT session: its token is void and the pill drops its name at once.
+        // Screen sharing, the tunnel and the link stay up (an agent can connect again with a new Allow).
+        big(R.string.pill_disconnect_agent) {
             clearHints()
-            AgentStatus.clear()
-            UserEvents.add("cancel_all", "session stopped")
+            SessionService.revokeAgents()
+            // Queued AFTER the revoke: a waiting wait_for_change/wait_for_script of the old agent returns it now;
+            // otherwise it is dropped when the next session token is issued (never delivered to a new session).
+            UserEvents.add("cancel_all", "agent disconnected by the owner")
+            android.widget.Toast.makeText(applicationContext, R.string.disconnect_agent_done, android.widget.Toast.LENGTH_SHORT).show()
+            finish()
+        }
+        // Separate, explicit full shutdown: screen sharing, tunnel (the link dies) and the agent.
+        big(R.string.pill_stop_bekon) {
+            clearHints()
+            SessionService.revokeAgents()
+            UserEvents.add("cancel_all", "Bekon stopped by the owner")
             // Let a waiting wait_for_change/wait_for_script return the event before the server goes down.
             android.os.Handler(mainLooper).postDelayed({ SessionService.stopNow(applicationContext) }, 1200)
             finish()
