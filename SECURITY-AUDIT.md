@@ -74,6 +74,8 @@ No SYSTEM_ALERT_WINDOW, contacts, SMS, location, storage or camera/mic permissio
 
 > **Update v1.0.39 (privacy policy text only):** the Google Play build's in-app privacy policy ([src/playStore/assets/privacy.html](https://github.com/tsol/bekon-agent/blob/v1.0.39/bekon-agent/src/playStore/assets/privacy.html)) now matches the published policy at <https://bekon.potoki.pro/privacy> (updated 2026-10-29). No code, permission or network behaviour changed; the full (sideload) build's policy is unchanged.
 
+> **Update v1.0.40 (stop fix only):** after "Stop & disconnect" in the notification, Bekon no longer re-posts an orphan ongoing notification. In 1.0.39 the stop intent briefly re-promoted the foreground service without the media-projection type, Android then ended the projection, and the capture-lost handler re-promoted the service and re-posted the notification after it had stopped. Now a stop guard ([session/StopGuard.kt](https://github.com/tsol/bekon-agent/blob/v1.0.40/bekon-agent/src/main/kotlin/pro/potoki/bekon/agent/session/StopGuard.kt)) makes Stop final: no re-promotion, no capture-lost handling, hints or notification updates after Stop, and the notification is removed first. No permission, network or data-handling change.
+
 ## Fixes in v1.0.10
 1. A guard inside `DeviceExecutor` itself: reads need a live, unpaused session; writes also need read-only off. This covers coach scripts and anything else that bypasses the MCP layer.
 2. Results of long calls that finish after Pause or Stop are dropped.

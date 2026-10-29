@@ -47,6 +47,8 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
     @Volatile private var skipBlackUntil = 0L
     @Volatile private var startedAt = 0L
     @Volatile private var contentVisible = true
+    /** Set by our own [stop]: the projection ending afterwards is not a "system stop" (1.0.40). */
+    @Volatile private var released = false
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onCapturedContentVisibilityChanged(isVisible: Boolean) {
             contentVisible = isVisible
@@ -54,6 +56,10 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
         }
 
         override fun onStop() {
+            if (released) {
+                Log.i(TAG, "MediaProjection stopped after our own stop(): not a capture loss")
+                return
+            }
             val km = context.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
             val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
             val secs = if (startedAt > 0) (System.currentTimeMillis() - startedAt) / 1000 else -1
@@ -64,7 +70,7 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
             }) + ", after ${secs}s" + (if (!contentVisible) ", captured content was hidden" else "")
             Log.w(TAG, "MediaProjection stopped by system: $lastLossReason")
             try { onSystemStop?.invoke() } catch (e: Exception) { Log.w(TAG, "onSystemStop: ${e.message}") }
-            captureHandler.post {
+            if (captureThread.isAlive) captureHandler.post {
                 releasePreviewDisplay()
                 mediaProjection = null
             }
@@ -108,7 +114,7 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
         // Android 14+ requires a callback before createVirtualDisplay; harmless on 13/Itel.
         mp.registerCallback(projectionCallback, captureHandler)
         mediaProjection = mp
-        startedAt = System.currentTimeMillis(); contentVisible = true; lastLossReason = null
+        startedAt = System.currentTimeMillis(); contentVisible = true; lastLossReason = null; released = false
         bindPreviewDisplay()
         Log.i(TAG, "Virtual display created: ${width}x${height}")
     }
@@ -266,6 +272,7 @@ class ScreenCapture(private val context: Context) : CaptureProvider {
     }
 
     override fun stop() {
+        released = true
         releasePreviewDisplay()
         try {
             mediaProjection?.unregisterCallback(projectionCallback)

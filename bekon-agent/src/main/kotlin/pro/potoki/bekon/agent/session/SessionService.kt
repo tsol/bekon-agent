@@ -60,10 +60,10 @@ class SessionService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val DEFAULT_PORT = 8711
 
-        const val ACTION_START = "pro.potoki.bekon.agent.action.START"
-        const val ACTION_STOP = "pro.potoki.bekon.agent.action.STOP"
+        const val ACTION_START = StopGuard.ACTION_START
+        const val ACTION_STOP = StopGuard.ACTION_STOP
         /** Notification swiped away (Android 14+ allows dismissing FGS notifications): re-post it. */
-        const val ACTION_REPOST = "pro.potoki.bekon.agent.action.REPOST_NOTIFICATION"
+        const val ACTION_REPOST = StopGuard.ACTION_REPOST
 
         @Volatile var instance: SessionService? = null
             private set
@@ -153,6 +153,8 @@ class SessionService : Service() {
     private var wakeLock: WakeLock? = null
     private var gate: ClientGate? = null
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    /** Once Stop ran nothing re-posts the notification, re-promotes or reacts to the projection ending (1.0.40). */
+    private val guard = StopGuard()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -167,15 +169,16 @@ class SessionService : Service() {
         acquireWakeLock()
         stepEngine = StepEngine(stepDetectors())
         // No battery-optimization dialog on start: it is an optional step the human or agent opens on purpose.
-        pro.potoki.bekon.agent.device.capture.ScreenCapture.onSystemStop = { onCaptureLost() }
+        // Handled on the main thread, serialized with Stop (stopSession also runs on main).
+        pro.potoki.bekon.agent.device.capture.ScreenCapture.onSystemStop = { main.post { onCaptureLost() } }
         scope.launch {
             pro.potoki.bekon.agent.access.AgentConnections.state.collect {
-                if (_state.value.isRunning) try { updateNotification(statusText()) } catch (_: Exception) {}
+                if (_state.value.isRunning && !guard.stopped) try { updateNotification(statusText()) } catch (_: Exception) {}
             }
         }
         scope.launch {
             pro.potoki.bekon.agent.status.AgentStatus.current.collect {
-                if (_state.value.isRunning) try { updateNotification(statusText()) } catch (_: Exception) {}
+                if (_state.value.isRunning && !guard.stopped) try { updateNotification(statusText()) } catch (_: Exception) {}
             }
         }
         Log.i(TAG, "onCreate")
@@ -186,17 +189,26 @@ class SessionService : Service() {
         // Never use the mediaProjection type here: on Android 14 it requires a fresh projection
         // grant, which a sticky restart / auto-start does not have. Projection type is added in
         // handleCaptureResult() once the user actually grants capture.
-        if (!promoteForeground(withProjection = false)) {
+        // Stop is never preceded by a re-promotion: dropping the mediaProjection type makes Android 10+ end
+        // the projection right away, and its onStop used to race with Stop and re-post the notification.
+        val st0 = _state.value
+        val live = st0.isRunning || st0.phase == SessionPhase.STARTING
+        if (intent?.action == ACTION_START) guard.reset()
+        val promote = StopGuard.promoteFor(intent?.action, live, st0.captureGranted && executor != null)
+        if (promote != StopGuard.Promote.NONE && !promoteForeground(withProjection = promote == StopGuard.Promote.WITH_PROJECTION)) {
             Log.w(TAG, "cannot enter foreground; stopping gracefully")
             stopSelf(startId)
             return START_NOT_STICKY
         }
         when (intent?.action) {
             ACTION_START -> startSession()
-            ACTION_STOP -> stopSession()
+            ACTION_STOP -> {
+                stopSession()
+                return START_NOT_STICKY
+            }
             ACTION_REPOST -> {
-                if (_state.value.isRunning || _state.value.phase == SessionPhase.STARTING) updateNotification(statusText())
-                else stopSelf(startId)
+                if (live && !guard.stopped) updateNotification(statusText())
+                else { stopSelf(startId); return START_NOT_STICKY }
             }
             else -> {
                 // Re-delivery after a system kill (START_STICKY): resume if we were serving.
@@ -346,6 +358,10 @@ class SessionService : Service() {
     }
 
     private fun stopSession() {
+        // First: from here on nothing may post the notification or react to the projection ending.
+        guard.markStopped()
+        // The notification goes away at once (tunnel/server shutdown below can take a second).
+        removeNotification()
         probeThread?.interrupt(); probeThread = null; probeFailed = false
         pro.potoki.bekon.agent.access.AgentConnections.resetAll()
         gate?.reset()
@@ -361,7 +377,16 @@ class SessionService : Service() {
         server = null
         pro.potoki.bekon.agent.status.AgentStatus.clear()
         _state.value = HomeState()
+        removeNotification()
         stopSelf()
+    }
+
+    /** Leave the foreground and remove the session notification (also any copy posted by a late update). */
+    private fun removeNotification() {
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)   // minSdk 24
+        } catch (_: Exception) {}
+        try { getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID) } catch (_: Exception) {}
     }
 
     private fun refreshState(ex: DeviceExecutor) {
@@ -408,6 +433,7 @@ class SessionService : Service() {
     }
 
     fun handleCaptureResult(data: Intent, resultCode: Int) {
+        if (guard.stopped) { Log.w(TAG, "capture result after Stop: ignored"); return }
         val ex = executor
         if (ex != null) {
             if (!promoteForeground(withProjection = true)) {
@@ -434,7 +460,11 @@ class SessionService : Service() {
      * Reflect that honestly instead of keeping "Live" with a dead screen.
      */
     private fun onCaptureLost() {
-        if (!_state.value.captureGranted) return
+        // After Stop the projection ending is expected: no state change, no hint, no notification.
+        if (!StopGuard.shouldHandleCaptureLost(guard.stopped, _state.value.isRunning, _state.value.captureGranted)) {
+            Log.i(TAG, "projection ended (stopped=${guard.stopped}, running=${_state.value.isRunning}): no capture-lost handling")
+            return
+        }
         val why = pro.potoki.bekon.agent.device.capture.ScreenCapture.lastLossReason ?: "unknown"
         Log.w(TAG, "capture lost: $why")
         _state.value = _state.value.copy(captureGranted = false, stepIndex = 0, error = "capture lost: $why") // re-derive: SCREEN is missing again
@@ -504,6 +534,7 @@ class SessionService : Service() {
     }
 
     private fun emitHint() {
+        if (guard.stopped) return
         val step = _state.value.currentStep
         val capture = _state.value.captureGranted
         val tunnelUp = tunnel?.isAlive() ?: false
@@ -572,6 +603,7 @@ class SessionService : Service() {
 
     override fun onDestroy() {
         Log.i(TAG, "onDestroy")
+        guard.markStopped()
         supervisor?.stop()
         supervisor = null
         try { tunnel?.stop() } catch (e: Exception) { Log.w(TAG, "tunnel stop ${e.message}") }
@@ -583,6 +615,7 @@ class SessionService : Service() {
         pro.potoki.bekon.agent.status.AgentStatus.clear()
         _state.value = HomeState()
         releaseWakeLock()
+        removeNotification()
         if (instance === this) instance = null
         super.onDestroy()
     }
@@ -659,8 +692,11 @@ class SessionService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIFICATION_ID, buildNotification(text))
+        // Atomic with Stop: an update racing with Stop either lands before it (and is removed) or not at all.
+        guard.ifRunning {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(NOTIFICATION_ID, buildNotification(text))
+        }
     }
 
     private fun acquireWakeLock() {
